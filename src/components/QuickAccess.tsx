@@ -1,70 +1,120 @@
-import { HeartPulse, Sparkles, ToolCase, Wrench } from "lucide-react";
-import { useEffect, useState } from "react";
-import { quickAccess, type QuickAccessCategory } from "../quickAccess";
-import { api, type SponsoredProfile } from "../services/api";
+import { ArrowRight, BriefcaseBusiness, Shuffle, Wrench } from "lucide-react";
+import { useEffect, useId, useState } from "react";
+import { quickAccess, type QuickAccessCategory, type QuickAccessRole } from "../quickAccess";
+import { api, type SponsoredProfile, type SponsoredProfileByRole } from "../services/api";
 
-const icons = { plomeria: Wrench, pediatria: HeartPulse, tecnico: ToolCase, profesional: Sparkles };
-const colors = {
-  plomeria: "bg-amber-400/15 text-amber-300",
-  pediatria: "bg-rose-400/15 text-rose-300",
-  tecnico: "bg-emerald-400/15 text-emerald-300",
-  profesional: "bg-sky-400/15 text-sky-300",
+const roles = ["tecnico", "profesional"] as const;
+const display = {
+  tecnico: { title: "Técnicos", next: "Otro técnico", Icon: Wrench, color: "border-emerald-400/40 bg-emerald-950 text-emerald-100" },
+  profesional: { title: "Profesionales", next: "Otro profesional", Icon: BriefcaseBusiness, color: "border-sky-400/40 bg-sky-950 text-sky-100" },
 };
+const cardColors = [
+  "border-emerald-400/40 bg-emerald-950",
+  "border-violet-400/40 bg-violet-950",
+  "border-sky-400/40 bg-sky-950",
+  "border-amber-400/40 bg-amber-950",
+];
+
+type Directory = { profiles: SponsoredProfileByRole[]; error: boolean };
+
+function shuffle(profiles: SponsoredProfileByRole[]) {
+  const shuffled = [...profiles];
+  for (let index = shuffled.length - 1; index > 0; index--) {
+    const next = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[next]] = [shuffled[next], shuffled[index]];
+  }
+  return shuffled;
+}
 
 export function QuickAccess({ currentUserId, onChoose }: {
   currentUserId?: string; onChoose: (category: QuickAccessCategory, profile: SponsoredProfile) => void;
 }) {
-  const [category, setCategory] = useState<QuickAccessCategory | null>(null);
-  const [result, setResult] = useState<{ category: QuickAccessCategory; profiles: SponsoredProfile[]; error?: string } | null>(null);
+  const listId = useId();
+  const [selected, setSelected] = useState<QuickAccessRole | null>(null);
+  const [directories, setDirectories] = useState<Partial<Record<QuickAccessRole, Directory>>>({});
+  const [featured, setFeatured] = useState({ tecnico: 0, profesional: 0 });
+  const [filter, setFilter] = useState<QuickAccessCategory | null>(null);
+  const [revision, setRevision] = useState(0);
 
   useEffect(() => {
-    if (!category) return;
     const controller = new AbortController();
-    api.radar.sponsored(category, controller.signal).then(profiles => {
-      if (!controller.signal.aborted) setResult({ category, profiles });
-    }).catch(() => {
-      if (!controller.signal.aborted) setResult({ category, profiles: [], error: "No se pudo cargar la lista. Vuelve a pulsar el acceso para intentarlo otra vez." });
-    });
+    for (const role of roles) {
+      api.radar.sponsoredByRole(role, controller.signal).then(profiles => {
+        const ordered = shuffle(profiles);
+        if (!controller.signal.aborted) setDirectories(previous => ({ ...previous, [role]: { profiles: ordered, error: false } }));
+      }).catch(() => {
+        if (!controller.signal.aborted) setDirectories(previous => ({ ...previous, [role]: { profiles: [], error: true } }));
+      });
+    }
     return () => controller.abort();
-  }, [category]);
+  }, [revision]);
 
-  const visible = result?.category === category ? result : null;
-  const profiles = visible?.profiles.filter(profile => profile.id !== currentUserId) ?? [];
+  function profilesFor(role: QuickAccessRole): SponsoredProfileByRole[] {
+    return directories[role]?.profiles.filter(profile => profile.id !== currentUserId) ?? [];
+  }
+
+  const visible = selected ? profilesFor(selected) : [];
+  const categories = [...new Set(visible.flatMap(profile => profile.categories))];
+  const filtered = filter ? visible.filter(profile => profile.categories.includes(filter)) : visible;
+
   return <section aria-label="Acceso rápido por especialidad" className="space-y-2">
     <div className="flex items-center justify-between gap-2">
       <h3 className="font-bold text-white">Acceso rápido por especialidad</h3>
-      <span className="text-xs text-amber-200">Patrocinado</span>
+      <span className="text-xs font-semibold text-amber-200">Patrocinado</span>
     </div>
     <div className="grid grid-cols-2 gap-2">
-      {(Object.keys(quickAccess) as QuickAccessCategory[]).map(id => {
-        const Icon = icons[id];
-        return <button key={id} type="button" aria-pressed={category === id} onClick={() => {
-          if (category === id) { setCategory(null); return; }
-          setResult(null);
-          setCategory(id);
-        }} className={`min-h-20 rounded-xl border bg-slate-800 p-3 text-left text-sm font-bold text-white ${category === id ? "border-amber-400" : "border-slate-700"}`}>
-          <span className={`mb-2 grid size-8 place-items-center rounded-lg ${colors[id]}`}><Icon className="size-4" aria-hidden="true" /></span>
-          {quickAccess[id].label}
-        </button>;
+      {roles.map(role => {
+        const { title, next, Icon, color } = display[role];
+        const profiles = profilesFor(role);
+        const profile = profiles.length ? profiles[featured[role] % profiles.length] : undefined;
+        return <div key={role} className={`flex min-w-0 flex-col rounded-xl border ${color} ${selected === role ? "ring-2 ring-amber-300" : ""}`}>
+          <button type="button" aria-expanded={selected === role} aria-controls={listId}
+            onClick={() => { setSelected(selected === role ? null : role); setFilter(null); }}
+            className="flex min-h-32 flex-1 flex-col gap-2 rounded-xl p-3 text-left">
+            <span className="flex items-center gap-2 text-sm font-bold"><Icon className="size-4 shrink-0" aria-hidden="true" />{title}</span>
+            {profile ? <span className="flex items-center gap-2">
+              {profile.avatar && <img src={profile.avatar} alt="" loading="lazy" className="size-8 shrink-0 rounded-lg object-cover" />}
+              <span className="min-w-0"><strong className="block break-words text-sm text-white">{profile.name}</strong>
+                <span className="block break-words text-xs">{profile.trade}</span></span>
+            </span> : <span className="text-xs">{!directories[role] ? "Cargando perfiles…" : directories[role]?.error ? "Lista no disponible" : "Sin perfiles activos"}</span>}
+            <span className="mt-auto flex items-center gap-1 text-xs font-semibold">{selected === role ? "Ocultar lista" : "Ver lista"} <ArrowRight className="size-3" aria-hidden="true" /></span>
+          </button>
+          {profiles.length > 1 && <button type="button" onClick={() => setFeatured(previous => ({ ...previous, [role]: previous[role] + 1 }))}
+            className="flex min-h-10 items-center gap-1.5 border-t border-white/15 px-3 text-left text-xs font-semibold">
+            <Shuffle className="size-3.5" aria-hidden="true" />{next}
+          </button>}
+        </div>;
       })}
     </div>
-    {category && <div className="space-y-2 rounded-xl border border-slate-700 bg-slate-950 p-3 text-sm">
-      <h4 className="font-bold text-amber-200">Perfiles patrocinados · {quickAccess[category].label}</h4>
-      {!visible && <p role="status">Cargando perfiles…</p>}
-      {visible?.error && <p role="status">{visible.error}</p>}
-      {visible && !visible.error && !profiles.length && <p>No hay perfiles patrocinados en esta categoría. Puedes publicar una solicitud abierta.</p>}
-      {profiles.map(profile => <article key={profile.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-800 p-3">
-        <div className="flex min-w-0 items-center gap-2">
-          {profile.avatar && <img src={profile.avatar} alt="" loading="lazy" className="size-10 shrink-0 rounded-lg object-cover" />}
-          <div className="min-w-0">
-            <h5 className="break-words font-bold text-white">{profile.name}</h5>
-            <p className="break-words text-slate-300">{profile.trade}{profile.reviewCount > 0 && ` · ★ ${profile.rating}`}</p>
-          </div>
+    <div id={listId} hidden={!selected} className="space-y-3 rounded-xl border border-slate-700 bg-slate-950 p-3 text-sm">
+      {selected && <>
+        <h4 className="font-bold text-amber-200">{display[selected].title} patrocinados</h4>
+        {!directories[selected] && <p role="status">Cargando perfiles…</p>}
+        {directories[selected]?.error && <p role="status">No se pudo cargar la lista. <button type="button" className="underline"
+          onClick={() => { setDirectories({}); setRevision(value => value + 1); }}>Volver a intentar</button></p>}
+        {directories[selected] && !directories[selected]?.error && !visible.length &&
+          <p>No hay perfiles patrocinados activos. Puedes publicar una solicitud abierta.</p>}
+        {categories.length > 1 && <div aria-label="Filtrar por especialidad" className="flex flex-wrap gap-2">
+          <button type="button" aria-pressed={!filter} onClick={() => setFilter(null)} className="rounded-lg border border-slate-600 px-2 py-1.5 aria-pressed:border-amber-300">Todos</button>
+          {categories.map(category => <button type="button" key={category} aria-pressed={filter === category} onClick={() => setFilter(category)}
+            className="rounded-lg border border-slate-600 px-2 py-1.5 aria-pressed:border-amber-300">{quickAccess[category].label}</button>)}
+        </div>}
+        <div className="grid gap-2 sm:grid-cols-2">
+          {filtered.map((profile, index) => <article key={profile.id} className={`flex min-w-0 flex-col gap-3 rounded-xl border p-3 ${cardColors[index % cardColors.length]}`}>
+            <div className="flex min-w-0 items-center gap-2">
+              {profile.avatar && <img src={profile.avatar} alt="" loading="lazy" className="size-10 shrink-0 rounded-lg object-cover" />}
+              <div className="min-w-0">
+                <h5 className="break-words font-bold text-white">{profile.name}</h5>
+                <p className="break-words text-slate-200">{profile.trade}{profile.reviewCount > 0 && ` · ★ ${profile.rating}`}</p>
+              </div>
+            </div>
+            <button type="button" onClick={() => onChoose(filter ?? profile.categories[0], profile)}
+              className="mt-auto min-h-10 rounded-lg border border-white/35 px-3 py-2 font-bold text-white">
+              Solicitar cotización
+            </button>
+          </article>)}
         </div>
-        <button type="button" onClick={() => onChoose(category, profile)} className="rounded-lg border border-amber-400/50 px-3 py-2 font-bold text-amber-200">
-          Solicitar cotización
-        </button>
-      </article>)}
-    </div>}
+      </>}
+    </div>
   </section>;
 }

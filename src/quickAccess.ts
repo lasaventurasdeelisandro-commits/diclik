@@ -6,6 +6,7 @@ export const quickAccess = {
 } as const;
 
 export type QuickAccessCategory = keyof typeof quickAccess;
+export type QuickAccessRole = (typeof quickAccess)[QuickAccessCategory]["role"];
 export const isQuickAccessCategory = (value: unknown): value is QuickAccessCategory =>
   typeof value === "string" && Object.hasOwn(quickAccess, value);
 

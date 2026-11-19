@@ -994,6 +994,17 @@ export async function runAllTests() {
           (await requestPromotion(specialist, "tecnico")).status !== 409) {
         throw new Error("El especialista no vio el vencimiento o pudo duplicar una promoción activa.");
       }
+      if ((await publish(admin, { ...sponsor, category: "plomeria" })).status !== 200) {
+        throw new Error("No se pudo publicar la segunda especialidad del técnico.");
+      }
+      const technicians = await apiCall("/radar/sponsored?role=tecnico");
+      const professionals = await apiCall("/radar/sponsored?role=profesional");
+      const grouped = technicians.body.filter((item: any) => item.id === proId);
+      if (technicians.status !== 200 || professionals.status !== 200 || grouped.length !== 1 ||
+          grouped[0].categories.join(",") !== "plomeria,tecnico" ||
+          professionals.body.some((item: any) => item.id === proId) || "payment_reference" in grouped[0]) {
+        throw new Error("La vitrina mezcló roles, duplicó perfiles o expuso referencias de pago.");
+      }
       const directory = await apiCall("/radar/sponsored?category=tecnico");
       if (!directory.body.some((item: any) => item.id === proId && !("payment_reference" in item))) {
         throw new Error("No apareció el perfil o se expuso la referencia de pago.");

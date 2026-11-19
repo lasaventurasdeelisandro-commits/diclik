@@ -1,4 +1,4 @@
-import type { QuickAccessCategory } from "../quickAccess";
+import type { QuickAccessCategory, QuickAccessRole } from "../quickAccess";
 /**
  * Diclik.com — Enterprise API Client
  * Handles real HTTP communication with Express & PostgreSQL backend
@@ -15,6 +15,7 @@ export type Accreditation = {
 };
 export type ReviewAccreditation = Accreditation & { user_id: string; full_name: string; role: string };
 export type SponsoredProfile = { id: string; name: string; avatar?: string; trade: string; rating: number; reviewCount: number };
+export type SponsoredProfileByRole = SponsoredProfile & { categories: QuickAccessCategory[] };
 export type SponsoredAdministration = {
   profiles: { id: string; full_name: string; role: string; trade: string }[];
   requests: { user_id: string; full_name: string; category: QuickAccessCategory; submitted_at: string }[];
@@ -375,8 +376,8 @@ export const api = {
   },
 
   radar: {
-    async sponsored(category: QuickAccessCategory, signal?: AbortSignal): Promise<SponsoredProfile[]> {
-      const res = await fetch(`${API_BASE}/radar/sponsored?category=${encodeURIComponent(category)}`, { signal });
+    async sponsoredByRole(role: QuickAccessRole, signal?: AbortSignal): Promise<SponsoredProfileByRole[]> {
+      const res = await fetch(`${API_BASE}/radar/sponsored?role=${encodeURIComponent(role)}`, { signal });
       return handleResponse(res, "No se pudo cargar la lista patrocinada.");
     },
     async scanRequests(role: "tecnico" | "profesional", center: { lat: number; lng: number }, radius: number) {

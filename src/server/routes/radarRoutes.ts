@@ -143,15 +143,27 @@ radarRouter.get("/requests", async (req: Request, res: Response) => {
 });
 
 radarRouter.get("/sponsored", async (req: Request, res: Response) => {
-  if (!isQuickAccessCategory(req.query.category)) {
+  const { role, category } = req.query;
+  if (role !== undefined ? role !== "tecnico" && role !== "profesional" : !isQuickAccessCategory(category)) {
     res.status(400).json({ error: "Selecciona un acceso rápido válido." });
     return;
   }
   try {
+    if (role === "tecnico" || role === "profesional") {
+      const result = await db.query(
+        `SELECT user_id AS id, full_name AS name, avatar_url AS avatar, trade, rating, review_count AS "reviewCount",
+                ARRAY_AGG(category ORDER BY CASE WHEN category IN ('plomeria', 'pediatria') THEN 0 ELSE 1 END, category) AS categories
+         FROM active_sponsored_specialists WHERE role = $1
+         GROUP BY user_id, full_name, avatar_url, trade, rating, review_count
+         ORDER BY full_name, user_id;`, [role],
+      );
+      res.json(result.rows);
+      return;
+    }
     const result = await db.query(
       `SELECT user_id AS id, full_name AS name, avatar_url AS avatar, role, trade, rating, review_count AS "reviewCount"
        FROM active_sponsored_specialists WHERE category = $1
-       ORDER BY full_name, user_id LIMIT 50;`, [req.query.category],
+       ORDER BY full_name, user_id LIMIT 50;`, [category],
     );
     res.json(result.rows);
   } catch {
