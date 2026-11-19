@@ -57,7 +57,9 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     const hostHeader = req.headers.host;
     const isSameHost = hostHeader && (origin === `https://${hostHeader}` || origin === `http://${hostHeader}`);
 
-    if (allowedOrigins.includes(origin) || isSameHost || (!isProd && isLocalOrigin)) {
+    // Capacitor serves the installed Android app from this secure virtual origin.
+    const isAndroidApiOrigin = origin === "https://localhost" && req.path.startsWith("/api/v1/");
+    if (allowedOrigins.includes(origin) || isSameHost || isAndroidApiOrigin || (!isProd && isLocalOrigin)) {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Vary", "Origin");
       res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");

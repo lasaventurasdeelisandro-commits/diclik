@@ -17,8 +17,8 @@
 Define la URL HTTPS definitiva de tu servidor API antes de generar el bundle web:
 
 ```bash
-export VITE_API_BASE_URL="https://api.tudominio-diclik.com"
-# Añade https://localhost a CORS_ORIGIN en la configuración del backend Android.
+export VITE_API_BASE_URL="https://diclik.vercel.app"
+# El backend admite el origen HTTPS local de Capacitor para /api/v1/.
 export NODE_ENV=production
 npm run build
 npx cap sync android
