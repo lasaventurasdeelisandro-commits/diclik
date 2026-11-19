@@ -343,7 +343,7 @@ export const api = {
       return handleResponse(res, "Error al consultar reseñas");
     },
 
-    async getNotifications(signal?: AbortSignal): Promise<{ id: string; title: string; body: string; read: boolean }[]> {
+    async getNotifications(signal?: AbortSignal): Promise<{ id: string; title: string; body: string; read: boolean; type: string; created_at: string }[]> {
       const res = await fetch(`${API_BASE}/notifications`, {
         headers: { ...getAuthHeader() }, signal
       });

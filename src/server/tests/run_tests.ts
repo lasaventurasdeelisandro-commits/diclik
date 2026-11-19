@@ -469,6 +469,15 @@ export async function runAllTests() {
         method: "PATCH", headers: proHeaders, body: JSON.stringify({ status: "in_progress" }),
       });
       if (transit.status !== 200 || arrival.status !== 200) throw new Error("No se registró el trayecto y la llegada");
+      const repeatedArrival = await apiCall(`/contracts/${contractId}/status`, {
+        method: "PATCH", headers: proHeaders, body: JSON.stringify({ status: "in_progress" }),
+      });
+      const customerNotices = await apiCall("/notifications", { headers: clientHeaders });
+      const arrivals = customerNotices.body.filter((item: any) => item.type === "SPECIALIST_ARRIVED" && item.data?.contractId === contractId);
+      if (repeatedArrival.status !== 200 || arrivals.length !== 1) {
+        throw new Error("La llegada debe generar un solo aviso al cliente, incluso con reintentos");
+      }
+
 
       // Race condition / duplicate accept attempt MUST return 409
       const dupAccept = await apiCall(`/offers/${offerId}/accept`, {

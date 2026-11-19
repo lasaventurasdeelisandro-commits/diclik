@@ -1,3 +1,4 @@
+import { getWorkAlertMode, setWorkAlertMode, unlockWorkAlerts } from "../services/publicationSound";
 import { AccountIdentity, SpecialistAccreditation } from "./Accreditation";
 import React, { useEffect, useState } from "react";
 import {
@@ -43,6 +44,7 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
   onSpeak
 }) => {
   const [authTab, setAuthTab] = useState<"login" | "register" | "recover">("login");
+  const [alertMode, setAlertMode] = useState(getWorkAlertMode);
   const [panelTab, setPanelTab] = useState<"perfil" | "billetera" | "contratos" | "alertas">("perfil");
 
   // Auth form states
@@ -632,6 +634,19 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
                   <span>Alertas{unread > 0 ? ` (${unread})` : ""}</span>
                 </button>
               </div>
+
+              {panelTab === "perfil" && <label className="block rounded-xl border border-slate-700 p-3 text-xs">
+                <span className="block font-bold">Avisos de servicio</span>
+                <select value={alertMode} onChange={event => {
+                  const next = event.currentTarget.value === "sound" ? "sound" : "voice";
+                  setAlertMode(next);
+                  setWorkAlertMode(next);
+                  unlockWorkAlerts();
+                }} className="mt-2 w-full rounded-lg bg-slate-950 p-2">
+                  <option value="voice">Voz</option>
+                  <option value="sound">Sonidos</option>
+                </select>
+              </label>}
 
               {panelTab === "perfil" && <AccountIdentity key={currentUser.id} />}
 

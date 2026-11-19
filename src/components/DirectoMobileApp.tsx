@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { ServiceLocation, type ServicePoint } from "./ServiceLocation";
 import { DiclikOperations } from "./DiclikOperations";
 import { api, needsAccountDocuments } from "../services/api.ts";
-import { playPublicationSound, preparePublicationSound } from "../services/publicationSound";
+import { playWorkAlert, unlockWorkAlerts, type WorkAlert } from "../services/publicationSound";
 import { DiclikAccountModal, AuthUserSummary } from "./DiclikAccountModal.tsx";
 import {
   Search,
@@ -1370,6 +1370,44 @@ export function DirectoMobileApp({
   const [isAccountModalOpen, setIsAccountModalOpen] = useState<boolean>(false);
   const [publishedRequestId, setPublishedRequestId] = useState("");
   const [publicationMessage, setPublicationMessage] = useState("");
+  const [arrivalNotice, setArrivalNotice] = useState("");
+  const announceWork = useCallback((event: WorkAlert, text: string) => {
+    playWorkAlert(event, text, onSpeak);
+  }, [onSpeak]);
+  const workVoice = useRef(announceWork);
+  workVoice.current = announceWork;
+  const receiptRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!publishedRequestId) return;
+    receiptRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [publishedRequestId]);
+
+  useEffect(() => {
+    setArrivalNotice("");
+    if (isDemo || !authUser?.id || authUser.role === "admin") return;
+    const controller = new AbortController();
+    const startTime = Date.now();
+    const seen = new Set<string>();
+    let timer: ReturnType<typeof setTimeout>;
+    async function poll() {
+      try {
+        const notices = await api.services.getNotifications(controller.signal);
+        if (controller.signal.aborted) return;
+        for (const notice of notices) {
+          if (notice.type !== "SPECIALIST_ARRIVED" || seen.has(notice.id) || Date.parse(notice.created_at) < startTime) continue;
+          seen.add(notice.id);
+          setArrivalNotice(notice.body);
+          workVoice.current("arrived", notice.body);
+        }
+      } catch {
+        // Retry on temporary connection failure.
+      }
+      if (!controller.signal.aborted) timer = setTimeout(poll, 10000);
+    }
+    void poll();
+    return () => { controller.abort(); clearTimeout(timer); };
+  }, [authUser?.id, authUser?.role]);
   const publicationPending = useRef(false);
   const [publishing, setPublishing] = useState(false);
 
@@ -1683,6 +1721,7 @@ export function DirectoMobileApp({
 
     if (!isDemo) {
       if (!authUser) {
+        setPublicationMessage("Inicia sesión o crea una cuenta para publicar tu solicitud.");
         setIsAccountModalOpen(true);
         return;
       }
@@ -1695,7 +1734,7 @@ export function DirectoMobileApp({
       setPublishing(true);
       setPublicationMessage("");
       setPublishedRequestId("");
-      const sound = preparePublicationSound();
+      announceWork("publishing", "Publicando tu solicitud.");
       try {
         const categories = await api.services.getCategories();
         const registeredCategory = categories.find((category: { id: string }) => category.id === detectedTax.id);
@@ -1716,12 +1755,8 @@ export function DirectoMobileApp({
         setCurrentScreen("requests_feed");
         const searching = detectedTax.targetRole === "profesional" ? "Buscando profesionales." : "Buscando técnicos.";
         setPublicationMessage(`${searching} Aquí podrás revisar las ofertas recibidas.`);
-        void playPublicationSound(sound).catch(() => {}).then(() => {
-          if (sound) void sound.close().catch(() => {});
-          onSpeak(`Solicitud publicada. ${searching}`);
-        });
+        announceWork("published", `Solicitud publicada. ${searching}`);
       } catch (error) {
-        if (sound) void sound.close().catch(() => {});
         if (needsAccountDocuments(error)) setIsAccountModalOpen(true);
         setPublicationMessage(error instanceof Error ? error.message : "No se pudo publicar la solicitud.");
       } finally {
@@ -2141,7 +2176,7 @@ export function DirectoMobileApp({
 
   // Render Inner Mobile UI Content
   const renderMobileContent = () => (
-    <div className="flex-1 flex flex-col justify-between overflow-hidden bg-slate-900 text-white select-none relative">
+    <div onPointerDownCapture={unlockWorkAlerts} onKeyDownCapture={unlockWorkAlerts} className="flex-1 flex flex-col justify-between overflow-hidden bg-slate-900 text-white select-none relative">
       {/* Top Mobile Bar */}
       <div className="p-3 bg-slate-900/95 backdrop-blur border-b border-slate-800 flex items-center justify-between sticky top-0 z-30">
         <div className="flex items-center space-x-2">
@@ -2226,8 +2261,11 @@ export function DirectoMobileApp({
       <div className="flex-1 overflow-y-auto p-3.5 space-y-3.5 relative">
         
         {isDemo && <p role="status" className="rounded-lg bg-amber-950 p-2 text-amber-200 text-xs">Modo de pruebas · negociación, GPS y fondos de demostración</p>}
-        {!isDemo && publicationMessage && (publishedRequestId
-          ? <div role="status" className="rounded-xl border border-emerald-400/40 bg-emerald-950 p-3 text-sm text-emerald-100">
+        {!isDemo && arrivalNotice && <div role="status" className="rounded-lg bg-sky-950 p-3 text-sm text-sky-100">
+          {arrivalNotice} <button type="button" className="ml-2 underline" onClick={() => { setArrivalNotice(""); setCurrentScreen("tracking"); }}>Ver contrato</button>
+        </div>}
+        {!isDemo && currentScreen !== "home" && publicationMessage && (publishedRequestId
+          ? <div ref={receiptRef} role="status" className="rounded-xl border border-emerald-400/40 bg-emerald-950 p-3 text-sm text-emerald-100">
               <p className="flex items-center gap-2 font-bold"><CheckCircle2 className="size-5" aria-hidden="true" />Solicitud publicada</p>
               <p className="mt-1">{publicationMessage}</p>
             </div>
@@ -2240,7 +2278,8 @@ export function DirectoMobileApp({
             role={mobileRole}
             initialRequest={currentScreen === "requests_feed" ? publishedRequestId : undefined}
             onSignIn={() => setIsAccountModalOpen(true)}
-            onContractAccepted={() => { setPublicationMessage(""); setCurrentScreen("tracking"); }}
+            onContractAccepted={() => { setPublicationMessage("Contratación confirmada. Ya puedes ver el contrato y su seguimiento."); setPublishedRequestId(""); setCurrentScreen("tracking"); }}
+            onWorkAlert={announceWork}
           />
           </div>
         )}
@@ -2525,6 +2564,9 @@ export function DirectoMobileApp({
                 onChange={updateServicePoint}
                 onConfirm={() => { setServicePointConfirmed(true); setPublicationMessage(""); }} />}
 
+              {!isDemo && (publishing || publicationMessage) && <p role="status" className="rounded-lg border border-amber-400/40 bg-slate-950 px-3 py-2 text-sm text-amber-100">
+                {publishing ? "Publicando tu solicitud…" : publicationMessage}
+              </p>}
               {/* PRIMARY CTA BUTTON: SOLICITAR SERVICIO Y ABRIR RADAR DE NEGOCIACIÓN */}
               <button
                 onClick={() => handleClientSearchAndRequest()}

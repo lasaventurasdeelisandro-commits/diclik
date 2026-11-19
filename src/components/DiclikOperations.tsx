@@ -1,3 +1,4 @@
+import type { WorkAlert } from "../services/publicationSound";
 import { FormEvent, lazy, Suspense, useEffect, useMemo, useState } from "react";
 import type { RadarPoint } from "./RadarMap";
 import { RadarGrid, RadarServiceCard, type RadarSort, type RadarSpecialist } from "./RadarServices";
@@ -51,8 +52,8 @@ function AmountForm({ label, onSubmit, disabled }: {
   </form>;
 }
 
-export function DiclikOperations({ view, user, role, onSignIn, initialRequest, onContractAccepted }: {
-  view: View; user: AuthUserSummary | null; role: Role; onSignIn: () => void; initialRequest?: string; onContractAccepted: () => void;
+export function DiclikOperations({ view, user, role, onSignIn, initialRequest, onContractAccepted, onWorkAlert }: {
+  view: View; user: AuthUserSummary | null; role: Role; onSignIn: () => void; initialRequest?: string; onContractAccepted: () => void; onWorkAlert?: (event: WorkAlert, text: string) => void;
 }) {
   const [requests, setRequests] = useState<RequestRow[]>([]);
   const [offers, setOffers] = useState<Offer[]>([]);
@@ -186,6 +187,7 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
               }, "Contraoferta enviada. Si la otra parte acepta, se formalizará el contrato.")} />
               {(isClient ? offer.counter_proposed_by !== user?.id : Boolean(offer.counter_proposed_by && offer.counter_proposed_by !== user?.id)) && <button className={button} disabled={busy} onClick={() => run(async () => {
                 await api.services.acceptOffer(offer.id);
+                onWorkAlert?.("hired", "Contratación confirmada.");
                 onContractAccepted();
               }, "Contratación confirmada.")}>Contratar</button>}
               <button className={button} disabled={busy} onClick={() => run(async () => {
@@ -282,7 +284,10 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
         )}
         {item.professional_id === user?.id && active.includes(item.status) && <>
           {item.status !== "in_progress" && <button className={button} disabled={busy} onClick={() => run(async () => {
-            await api.services.updateContractStatus(item.id, item.status === "held_in_escrow" ? "active_in_transit" : "in_progress"); await refresh();
+            const arriving = item.status !== "held_in_escrow";
+            await api.services.updateContractStatus(item.id, arriving ? "in_progress" : "active_in_transit");
+            if (arriving) onWorkAlert?.("arrived", "Llegada registrada. Se avisó al cliente.");
+            await refresh();
           }, "Estado actualizado.")}>{item.status === "held_in_escrow" ? "Iniciar trayecto" : "Marcar llegada"}</button>}
           <form className="flex gap-2" onSubmit={event => {
             event.preventDefault();

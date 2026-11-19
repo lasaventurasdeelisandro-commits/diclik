@@ -780,11 +780,26 @@ marketplaceRouter.patch("/contracts/:id/status", requireAuth, async (req: Authen
       return;
     }
     const previousStatus = status === "active_in_transit" ? "held_in_escrow" : "active_in_transit";
-    const updated = await db.query(
-      "UPDATE contracts SET status = $1 WHERE id = $2 AND status IN ($1, $3) RETURNING id;",
-      [status, id, previousStatus]
-    );
-    if (!updated.rows.length) {
+    const transitioned = await db.transaction(async tx => {
+      const updated = await tx.query(
+        "UPDATE contracts SET status = $1 WHERE id = $2 AND status = $3 RETURNING id;",
+        [status, id, previousStatus]
+      );
+      if (!updated.rows.length) {
+        const current = await tx.query("SELECT 1 FROM contracts WHERE id = $1 AND status = $2;", [id, status]);
+        return current.rows.length > 0;
+      }
+      if (status === "in_progress") {
+        await tx.query(
+          `INSERT INTO notifications (id, user_id, type, title, body, data)
+           VALUES ($1, $2, 'SPECIALIST_ARRIVED', 'Llegada registrada', $3, $4);`,
+          ["notif_" + crypto.randomUUID().slice(0, 12), contract.client_id,
+           "Tu especialista marcó su llegada al lugar del servicio.", JSON.stringify({ contractId: id })]
+        );
+      }
+      return true;
+    });
+    if (!transitioned) {
       res.status(409).json({ error: "El estado actual no permite esta transición." });
       return;
     }
