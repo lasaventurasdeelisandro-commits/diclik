@@ -64,7 +64,14 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
   const [wallet, setWallet] = useState<any>(null);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [contracts, setContracts] = useState<any[]>([]);
-  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notificationState, setNotificationState] = useState<{
+    userId: string; items: Awaited<ReturnType<typeof api.services.getNotifications>>;
+  } | null>(null);
+  const [notificationError, setNotificationError] = useState("");
+  const [notificationRevision, setNotificationRevision] = useState(0);
+  const notificationUserId = currentUser?.id;
+  const notifications = notificationState?.userId === notificationUserId ? notificationState?.items ?? [] : [];
+  const unread = notifications.filter(item => !item.read).length;
   const [editName, setEditName] = useState("");
   const [editPhone, setEditPhone] = useState("");
   const [editAddress, setEditAddress] = useState("");
@@ -86,12 +93,11 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
   const loadAccountData = async () => {
     if (!currentUser) return;
     try {
-      const [meData, ledgerData, txData, contractsData, notifData] = await Promise.all([
+      const [meData, ledgerData, txData, contractsData] = await Promise.all([
         api.auth.getMe(),
         api.wallet.getLedger().catch(() => null),
         api.wallet.getTransactions().catch(() => []),
-        api.services.listContracts().catch(() => []),
-        api.services.getNotifications().catch(() => [])
+        api.services.listContracts().catch(() => [])
       ]);
       if (meData) {
         const u = meData.user || meData;
@@ -104,7 +110,6 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
       if (ledgerData) setWallet(ledgerData);
       setTransactions(Array.isArray(txData) ? txData : []);
       setContracts(Array.isArray(contractsData) ? contractsData : []);
-      setNotifications(Array.isArray(notifData) ? notifData : []);
     } catch {
       // Handled per-request
     }
@@ -115,6 +120,29 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
       loadAccountData();
     }
   }, [isOpen, currentUser]);
+
+  useEffect(() => {
+    if (!isOpen || !notificationUserId) return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    async function refreshNotifications() {
+      try {
+        const items = await api.services.getNotifications(controller.signal);
+        if (controller.signal.aborted) return;
+        setNotificationState({ userId: notificationUserId!, items });
+        setNotificationError("");
+      } catch {
+        if (controller.signal.aborted) return;
+        setNotificationError("No se pudieron actualizar las alertas.");
+      }
+      timer = setTimeout(refreshNotifications, 15000);
+    }
+    void refreshNotifications();
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [isOpen, notificationUserId, notificationRevision]);
 
   if (!isOpen) return null;
 
@@ -294,8 +322,12 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
   };
 
   const handleMarkNotifRead = async (id: string) => {
-    await api.services.markNotificationRead(id).catch(() => {});
-    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+    try {
+      await api.services.markNotificationRead(id);
+      setNotificationRevision(value => value + 1);
+    } catch {
+      setNotificationError("No se pudo marcar la alerta como leída.");
+    }
   };
 
   const handleRequestWithdraw = async (e: React.FormEvent) => {
@@ -603,7 +635,7 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
                   }`}
                 >
                   <Bell className="w-3 h-3" />
-                  <span>Alertas</span>
+                  <span>Alertas{unread > 0 ? ` (${unread})` : ""}</span>
                 </button>
               </div>
 
@@ -886,14 +918,17 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
 
               {panelTab === "alertas" && (
                 <div className="space-y-2 max-h-72 overflow-y-auto">
-                  {notifications.length === 0 ? (
+                  {notificationError && <p role="status" className="text-xs text-amber-300">{notificationError}</p>}
+                  {notifications.length === 0 && !notificationError ? (
                     <p className="text-[11px] text-slate-400 text-center py-6">Sin notificaciones pendientes.</p>
                   ) : (
                     notifications.map((n) => (
-                      <div
+                      <button
+                        type="button"
                         key={n.id}
                         onClick={() => handleMarkNotifRead(n.id)}
-                        className={`p-2.5 rounded-xl border text-[11px] cursor-pointer ${
+                        disabled={n.read}
+                        className={`w-full text-left p-2.5 rounded-xl border text-[11px] ${
                           n.read
                             ? "bg-slate-950 border-slate-800 text-slate-400"
                             : "bg-blue-950/40 border-blue-500/40 text-white"
@@ -901,7 +936,7 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
                       >
                         <div className="font-bold">{n.title}</div>
                         <div className="text-[10px] opacity-80">{n.body}</div>
-                      </div>
+                      </button>
                     ))
                   )}
                 </div>
