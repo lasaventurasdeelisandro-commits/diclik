@@ -98,6 +98,7 @@ adminRouter.get("/operations", async (req, res) => {
 // Operational journal derived from recorded movements. Bank cash requires separate reconciliation.
 adminRouter.get("/accounting", async (req, res) => {
   const exportCsv = req.query.format === "csv";
+  const exportExcel = req.query.format === "xlsx";
   const page = Number(req.query.page ?? 1);
   if (!Number.isSafeInteger(page) || page < 1 || page > 1000000) {
     res.status(400).json({ error: "Página inválida." });
@@ -128,11 +129,26 @@ adminRouter.get("/accounting", async (req, res) => {
         (SELECT COUNT(*) FROM contracts WHERE status = 'completed') AS completed_count,
         (SELECT CASE WHEN COUNT(*) > 0 THEN COALESCE(SUM(expected_cents) FILTER (WHERE received_cents IS DISTINCT FROM expected_cents), 0) / 100.0 END FROM bank_settlements) AS bank_pending,
         (SELECT CASE WHEN COUNT(*) > 0 THEN COALESCE(SUM(received_cents) FILTER (WHERE received_cents = expected_cents), 0) / 100.0 END FROM bank_settlements) AS bank_confirmed`,
-      [exportCsv ? 0 : (page - 1) * 25, exportCsv ? null : 25],
+      [exportCsv || exportExcel ? 0 : (page - 1) * 25, exportExcel ? 10001 : exportCsv ? null : 25],
     );
     res.setHeader("Cache-Control", "private, no-store");
     const report = result.rows[0];
     const updatedAt = new Date().toISOString();
+    if (exportExcel) {
+      const { rows } = await db.query(
+        `SELECT provider, settlement_ref, expected_date::text, expected_cents, bank_account,
+                bank_ref, bank_date::text, received_cents
+         FROM bank_settlements ORDER BY expected_date, id LIMIT 10001`,
+      );
+      if (report.entries.length > 10000 || rows.length > 10000) {
+        res.status(413).json({ error: "El historial supera el límite de esta descarga de Excel." });
+        return;
+      }
+      const { buildAccountingWorkbook } = await import("./accountingWorkbook.ts");
+      const buffer = await buildAccountingWorkbook(report, rows as Parameters<typeof buildAccountingWorkbook>[1]);
+      res.attachment("diclik-ciclo-contable.xlsx").type("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet").send(buffer);
+      return;
+    }
     if (exportCsv) {
       sendFinanceCsv(res, "diclik-informe-financiero.csv", [
         ["Informe financiero operativo (DOP)", updatedAt],

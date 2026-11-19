@@ -43,11 +43,16 @@ export function AccountingDashboard() {
   return <section className="space-y-3 rounded-xl border border-slate-700 p-4" aria-label="Control financiero">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <h2 className="text-lg font-bold text-amber-300">Control financiero</h2>
+      <button className="rounded-lg bg-amber-400 px-3 py-1.5 text-sm font-bold text-slate-950" onClick={() => {
+        setDownloadError("");
+        void api.admin.downloadFinance("accounting", "xlsx").catch(error => setDownloadError(error.message));
+      }}>Descargar ciclo contable (Excel)</button>
       <button className={button} onClick={() => {
         setDownloadError("");
         void api.admin.downloadFinance("accounting").catch(error => setDownloadError(error.message));
       }}>Descargar informe financiero (CSV)</button>
     </div>
+    <p className="text-xs text-slate-300">El Excel incluye diario general, ajustes, cierre y estados preliminares. Requiere completar saldos, gastos y ajustes que no estén en DICLIK.</p>
     {downloadError && <p role="status">{downloadError}</p>}
     {error && <p role="status" className="text-amber-300">{error}</p>}
     {!data && !error && <p role="status">Cargando movimientos…</p>}

@@ -470,13 +470,13 @@ export const api = {
       });
       return handleResponse(res, "No se pudo guardar la liquidación.");
     },
-    async downloadFinance(report: "accounting" | "bank-settlements") {
-      const res = await fetch(`${API_BASE}/admin/${report}?format=csv`, { headers: getAuthHeader() });
-      if (!res.ok) throw new Error("No se pudo descargar el informe.");
+    async downloadFinance(report: "accounting" | "bank-settlements", format: "csv" | "xlsx" = "csv") {
+      const res = await fetch(`${API_BASE}/admin/${report}?format=${format}`, { headers: getAuthHeader() });
+      if (!res.ok) await handleResponse(res, "No se pudo descargar el informe.");
       const url = URL.createObjectURL(await res.blob());
       const link = document.createElement("a");
       link.href = url;
-      link.download = report === "accounting" ? "diclik-informe-financiero.csv" : "diclik-conciliacion-bancaria.csv";
+      link.download = format === "xlsx" ? "diclik-ciclo-contable.xlsx" : report === "accounting" ? "diclik-informe-financiero.csv" : "diclik-conciliacion-bancaria.csv";
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 30000);
     },
