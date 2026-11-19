@@ -1,6 +1,9 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { INITIAL_CATEGORIES } from "../data";
+import type { RadarPoint } from "./RadarMap";
 import { api } from "../services/api";
 import type { AuthUserSummary } from "./DiclikAccountModal";
+const RadarMap = lazy(() => import("./RadarMap").then(module => ({ default: module.RadarMap })));
 
 type Role = "cliente" | "tecnico" | "profesional";
 type View = "requests" | "radar" | "contracts" | "chat";
@@ -9,7 +12,7 @@ type Offer = { id: string; pro_name: string; professional_id: string; price: num
 type Contract = { id: string; request_title: string; status: string; address: string; otp_code?: string; professional_id: string; client_id: string };
 type Conversation = { id: string; request_title: string; client_name: string; pro_name: string };
 type Message = { id: string; sender_name: string; content: string };
-type Specialist = { id: string; name: string; trade: string; distanceKm: number };
+type Specialist = { id: string; name: string; trade: string; distanceKm: number; latOffset: number; lngOffset: number };
 type GPS = { lat: number; lng: number; updated_at?: string };
 
 const card = "rounded-2xl border border-slate-700 bg-slate-800/80 p-3 space-y-2";
@@ -23,11 +26,11 @@ const statusLabel: Record<string, string> = {
   accepted: "Aceptada", rejected: "Rechazada",
 };
 
-function radarMapUrl(center: GPS): string {
-  const lat = Math.max(-84.9, Math.min(84.9, Math.round(center.lat * 100) / 100));
-  const lng = Math.max(-179.9, Math.min(179.9, Math.round(center.lng * 100) / 100));
-  const bbox = [lng - 0.05, lat - 0.035, lng + 0.05, lat + 0.035].join(",");
-  return `https://www.openstreetmap.org/export/embed.html?${new URLSearchParams({ bbox, layer: "mapnik" })}`;
+const initialRadarCenter = { lat: 18.48, lng: -69.94 };
+const radarRadius = 15;
+
+function approximateCoordinate(value: number): number {
+  return Math.round(value * 100) / 100;
 }
 
 function position(): Promise<GPS> {
@@ -74,6 +77,18 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest }:
   const [message, setMessage] = useState("");
   const [scanned, setScanned] = useState(false);
   const [radarCenter, setRadarCenter] = useState<GPS | null>(null);
+  const [radarSelected, setRadarSelected] = useState<string | null>(null);
+  const [radarError, setRadarError] = useState(false);
+  const mapCenter = radarCenter ?? initialRadarCenter;
+  const radarPoints: RadarPoint[] = useMemo(() => specialists
+    .filter(item => Number.isFinite(item.latOffset) && Number.isFinite(item.lngOffset))
+    .map(item => ({
+      id: item.id,
+      label: `${item.trade} · ${item.name}`,
+      lat: approximateCoordinate(mapCenter.lat + (item.latOffset - 50) * radarRadius / (35 * 111)),
+      lng: approximateCoordinate(mapCenter.lng + (item.lngOffset - 50) * radarRadius / (35 * 111)),
+    })), [specialists, mapCenter]);
+
   const [adminUsers, setAdminUsers] = useState<{ id: string; email: string; role: string; status: string }[]>([]);
   const [disputes, setDisputes] = useState<{ id: string; reason: string; status: string }[]>([]);
   const isClient = user?.role === "cliente";
@@ -99,6 +114,23 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest }:
   useEffect(() => {
     refresh().catch(error => setNotice(error.message));
   }, [view, user?.id, role, selection]);
+
+  useEffect(() => {
+    if (view !== "radar") return;
+    let current = true;
+    setRadarError(false);
+    setScanned(false);
+    setSpecialists([]);
+    setRadarSelected(null);
+    api.radar.scan({ ...mapCenter, radius: radarRadius }).then((rows: Specialist[]) => {
+      if (!current) return;
+      setSpecialists(rows);
+      setScanned(true);
+    }).catch(() => {
+      if (current) setRadarError(true);
+    });
+    return () => { current = false; };
+  }, [view, mapCenter]);
 
   async function run(task: () => Promise<void>, success?: string) {
     setBusy(true);
@@ -183,25 +215,38 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest }:
     {view === "radar" && <>
       <h2 className="font-bold text-emerald-300">Radar GPS</h2>
       <figure className={card}>
-        <iframe
-          title="Mapa del radar GPS"
-          src={radarMapUrl(radarCenter ?? { lat: 18.48, lng: -69.94 })}
-          className="h-64 w-full rounded-xl border border-slate-700"
-          loading="lazy"
-          referrerPolicy="no-referrer"
-        />
+        <Suspense fallback={<p role="status">Cargando mapa…</p>}>
+          <RadarMap
+            center={{ lat: approximateCoordinate(mapCenter.lat), lng: approximateCoordinate(mapCenter.lng) }}
+            points={radarPoints}
+            selected={radarSelected}
+            onSelect={setRadarSelected}
+          />
+        </Suspense>
         <figcaption className="text-slate-300">
           {radarCenter ? "Zona aproximada de tu ubicación" : "Vista inicial de Santo Domingo"}
+          {radarPoints.length > 0 && " · Marcadores aproximados"}
         </figcaption>
       </figure>
       <button className={button} disabled={busy} onClick={() => run(async () => {
-        const center = await position();
-        setRadarCenter(center);
-        setSpecialists(await api.radar.scan({ ...center, radius: 15 }));
-        setScanned(true);
+        setRadarCenter(await position());
       })}>Buscar cerca de mi ubicación</button>
+      <h3 className="font-bold text-amber-300">Servicios cerca de ti</h3>
+      {radarError && <p role="status">La disponibilidad de especialistas no se puede consultar ahora.</p>}
+      {!scanned && !radarError && <p role="status">Buscando especialistas…</p>}
       {scanned && !specialists.length && <p>No hay especialistas disponibles en el radio consultado.</p>}
-      {specialists.map(item => <div className={card} key={item.id}><strong>{item.name}</strong><p>{item.trade} · {item.distanceKm} km aprox.</p></div>)}
+      {specialists.map(item => {
+        const markerIndex = radarPoints.findIndex(point => point.id === item.id);
+        return <button type="button" className={`${card} w-full text-left ${radarSelected === item.id ? "border-amber-300" : ""}`}
+          aria-pressed={radarSelected === item.id} key={item.id} onClick={() => setRadarSelected(item.id)}>
+          <strong>{markerIndex >= 0 ? `${markerIndex + 1}. ` : ""}{item.trade}</strong>
+          <p>{item.name} · {item.distanceKm} km aprox.</p>
+        </button>;
+      })}
+      <h3 className="font-bold text-amber-300">Categorías de servicios</h3>
+      <ul className="grid grid-cols-2 gap-2">
+        {INITIAL_CATEGORIES.map(category => <li className={card} key={category.id}>{category.name}</li>)}
+      </ul>
     </>}
     {view === "contracts" && <>
       <h2 className="font-bold text-amber-300">Contratos y rastreo</h2>
