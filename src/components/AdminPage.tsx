@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api } from "../services/api";
 import type { AuthUserSummary } from "./DiclikAccountModal";
 import { DiclikOperations } from "./DiclikOperations";
+import { AdminDashboard } from "./AdminDashboard";
 import { AccreditationReview } from "./Accreditation";
 
 export default function AdminPage() {
@@ -39,6 +40,7 @@ export default function AdminPage() {
         {user && <button className="text-sm underline" onClick={async () => { await api.auth.logout(); setUser(null); }}>Cerrar sesión</button>}
       </header>
       {user ? <>
+        <AdminDashboard />
         <AccreditationReview />
         <DiclikOperations view="requests" role="cliente" user={user} onSignIn={() => setUser(null)} onContractAccepted={() => {}} />
       </> : <form onSubmit={signIn} className="max-w-sm space-y-3 rounded-xl border border-slate-700 p-4">

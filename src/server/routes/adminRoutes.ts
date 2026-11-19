@@ -34,6 +34,66 @@ adminRouter.get("/metrics", async (_req: AuthenticatedRequest, res: Response) =>
   }
 });
 
+adminRouter.get("/operations", async (req, res) => {
+  const page = Number(req.query.page ?? 1);
+  if (!Number.isSafeInteger(page) || page < 1 || page > 1000000) {
+    res.status(400).json({ error: "Página inválida." });
+    return;
+  }
+
+  try {
+    const result = await db.query(
+      `WITH commissions AS (
+         SELECT contract_id, SUM(amount::numeric) AS amount
+         FROM financial_transactions WHERE type = 'fee_deduction' AND status = 'completed'
+         GROUP BY contract_id
+       ), services AS (
+         SELECT c.id, c.created_at, c.status, c.agreed_price, c.commission_rate,
+                c.platform_fee AS agreed_commission, COALESCE(f.amount, 0) AS recorded_commission,
+                sr.title, cl.full_name AS client, sp.full_name AS specialist,
+                sp.id AS specialist_id, sp.role AS specialist_role
+         FROM contracts c
+         JOIN service_requests sr ON sr.id = c.request_id
+         JOIN users cl ON cl.id = c.client_id
+         JOIN users sp ON sp.id = c.professional_id
+         LEFT JOIN commissions f ON f.contract_id = c.id
+       ), recent AS (
+         SELECT * FROM services
+         ORDER BY CASE WHEN status IN ('held_in_escrow','active_in_transit','in_progress') THEN 0 ELSE 1 END,
+                  created_at DESC, id DESC
+         LIMIT 25 OFFSET $1
+       ), by_specialist AS (
+         SELECT specialist_id, specialist, specialist_role, COUNT(*) AS services,
+                COUNT(*) FILTER (WHERE status IN ('held_in_escrow','active_in_transit','in_progress')) AS active,
+                SUM(recorded_commission) AS recorded_commission
+         FROM services GROUP BY specialist_id, specialist, specialist_role
+         ORDER BY active DESC, recorded_commission DESC, specialist_id
+         LIMIT 25 OFFSET $1
+       )
+       SELECT
+         (SELECT COUNT(*) FROM service_requests) AS requests,
+         (SELECT COUNT(*) FROM services) AS contracts,
+         (SELECT COUNT(DISTINCT specialist_id) FROM services WHERE status IN ('active_in_transit','in_progress')) AS operating,
+         (SELECT COUNT(*) FROM services WHERE status IN ('held_in_escrow','active_in_transit','in_progress')) AS active,
+         (SELECT COUNT(*) FROM services WHERE status = 'completed') AS completed,
+         (SELECT COALESCE(SUM(agreed_price::numeric), 0) FROM services WHERE status = 'completed') AS completed_value,
+         (SELECT COALESCE(SUM(amount), 0) FROM commissions) AS recorded_commission,
+         (SELECT COALESCE(SUM(platform_earnings::numeric), 0) FROM contract_cancellations) AS cancellation_income,
+         (SELECT COALESCE(SUM(amount), 0) FROM commissions) +
+         (SELECT COALESCE(SUM(platform_earnings::numeric), 0) FROM contract_cancellations) AS platform_income,
+         (SELECT COALESCE(SUM(amount::numeric), 0) FROM escrow_holds WHERE status = 'locked') AS held,
+         (SELECT COUNT(DISTINCT specialist_id) FROM services) AS specialist_count,
+         (SELECT COALESCE(json_agg(recent), '[]'::json) FROM recent) AS services,
+         (SELECT COALESCE(json_agg(by_specialist), '[]'::json) FROM by_specialist) AS specialists`,
+      [(page - 1) * 25],
+    );
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json({ ...result.rows[0], currency: "DOP", updated_at: new Date().toISOString() });
+  } catch {
+    res.status(500).json({ error: "No se pudo cargar el panel de operaciones." });
+  }
+});
+
 // GET /api/v1/admin/users
 adminRouter.get("/users", async (req: AuthenticatedRequest, res: Response) => {
   try {
