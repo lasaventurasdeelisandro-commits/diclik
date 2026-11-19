@@ -1,5 +1,6 @@
 import { Router, Response } from "express";
 import crypto from "crypto";
+import { contractAccounts } from "../../services/contractAccounts.ts";
 import { db } from "../db/index.ts";
 import { requireAuth, requireRole, AuthenticatedRequest } from "../middleware/auth.ts";
 
@@ -96,6 +97,7 @@ adminRouter.get("/operations", async (req, res) => {
 
 // Operational journal derived from recorded movements. Bank cash requires separate reconciliation.
 adminRouter.get("/accounting", async (req, res) => {
+  const exportCsv = req.query.format === "csv";
   const page = Number(req.query.page ?? 1);
   if (!Number.isSafeInteger(page) || page < 1 || page > 1000000) {
     res.status(400).json({ error: "Página inválida." });
@@ -112,7 +114,7 @@ adminRouter.get("/accounting", async (req, res) => {
         SELECT id, contract_id, created_at, 'cancellation_income', ROUND(platform_earnings::numeric, 2)
         FROM contract_cancellations WHERE platform_earnings > 0
       ), recent AS (
-        SELECT * FROM entries ORDER BY created_at DESC, id DESC LIMIT 25 OFFSET $1
+        SELECT * FROM entries ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $1
       )
       SELECT
         (SELECT COUNT(*) FROM entries) AS entry_count,
@@ -123,13 +125,140 @@ adminRouter.get("/accounting", async (req, res) => {
         (SELECT COALESCE(SUM(amount),0) FROM entries WHERE type = 'refund') AS refunded,
         (SELECT COALESCE(SUM(amount::numeric),0) FROM escrow_holds WHERE status = 'locked') AS held,
         (SELECT COALESCE(SUM(agreed_price::numeric),0) FROM contracts WHERE status = 'completed') AS completed_volume,
-        (SELECT COUNT(*) FROM contracts WHERE status = 'completed') AS completed_count`,
-      [(page - 1) * 25],
+        (SELECT COUNT(*) FROM contracts WHERE status = 'completed') AS completed_count,
+        (SELECT CASE WHEN COUNT(*) > 0 THEN COALESCE(SUM(expected_cents) FILTER (WHERE received_cents IS DISTINCT FROM expected_cents), 0) / 100.0 END FROM bank_settlements) AS bank_pending,
+        (SELECT CASE WHEN COUNT(*) > 0 THEN COALESCE(SUM(received_cents) FILTER (WHERE received_cents = expected_cents), 0) / 100.0 END FROM bank_settlements) AS bank_confirmed`,
+      [exportCsv ? 0 : (page - 1) * 25, exportCsv ? null : 25],
     );
     res.setHeader("Cache-Control", "private, no-store");
-    res.json({ ...result.rows[0], currency: "DOP", bank_pending: null, bank_confirmed: null, updated_at: new Date().toISOString() });
+    const report = result.rows[0];
+    const updatedAt = new Date().toISOString();
+    if (exportCsv) {
+      sendFinanceCsv(res, "diclik-informe-financiero.csv", [
+        ["Informe financiero operativo (DOP)", updatedAt],
+        ["Indicador", "Importe"],
+        ["Fondos retenidos", report.held], ["Comisión registrada", report.commission],
+        ["Ingresos por cancelación", report.cancellation_income], ["Abonos a especialistas", report.credited_to_specialists],
+        ["Reembolsos de contratos", report.refunded], ["Valor de servicios cerrados", report.completed_volume],
+        ["Liquidaciones sin conciliar", report.bank_pending ?? "Sin registro"],
+        ["Depósitos conciliados", report.bank_confirmed ?? "Sin registro"],
+        [],
+        ["Fecha", "Referencia", "Contrato", "Movimiento", "Cuenta debe", "Debe DOP", "Cuenta haber", "Haber DOP"],
+        ...report.entries.map((entry: { created_at: string; id: string; contract_id: string; type: keyof typeof contractAccounts; amount: number }) => {
+          const [label, debit, credit] = contractAccounts[entry.type];
+          return [entry.created_at, entry.id, entry.contract_id, label, debit, entry.amount, credit, entry.amount];
+        }),
+      ]);
+      return;
+    }
+    res.json({ ...report, currency: "DOP", updated_at: updatedAt });
   } catch {
     res.status(500).json({ error: "No se pudo consultar el registro financiero." });
+  }
+});
+
+function sendFinanceCsv(res: Response, filename: string, rows: unknown[][]) {
+  const csv = rows.map(row => row.map(cell => {
+    const value = String(cell ?? "");
+    const safe = /^[\s]*[=+@-]/.test(value) && !/^-?\d+(\.\d+)?$/.test(value) ? "'" + value : value;
+    return '"' + safe.replaceAll('"', '""') + '"';
+  }).join(",")).join("\r\n");
+  res.setHeader("Cache-Control", "private, no-store");
+  res.attachment(filename).type("text/csv").send("\uFEFF" + csv);
+}
+
+function bankText(value: unknown, max: number) {
+  return typeof value === "string" && value.trim().length > 0 && value.trim().length <= max ? value.trim() : null;
+}
+
+function bankDate(value: unknown) {
+  if (typeof value !== "string" || !/^20\d{2}-\d{2}-\d{2}$/.test(value)) return null;
+  const date = new Date(value + "T00:00:00Z");
+  return Number.isFinite(date.valueOf()) && date.toISOString().slice(0, 10) === value ? value : null;
+}
+
+adminRouter.get("/bank-settlements", async (req, res) => {
+  const page = Number(req.query.page ?? 1);
+  const exportCsv = req.query.format === "csv";
+  if (!Number.isSafeInteger(page) || page < 1 || page > 1000000) {
+    res.status(400).json({ error: "Página inválida." });
+    return;
+  }
+  try {
+    const { rows } = await db.query(
+      `SELECT id, provider, settlement_ref, expected_cents, expected_date::text, bank_account,
+              bank_ref, bank_date::text, received_cents, COUNT(*) OVER() AS total
+       FROM bank_settlements ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2`,
+      [exportCsv ? null : 25, exportCsv ? 0 : (page - 1) * 25],
+    );
+    res.setHeader("Cache-Control", "private, no-store");
+    if (exportCsv) {
+      sendFinanceCsv(res, "diclik-conciliacion-bancaria.csv", [
+        ["Proveedor", "Liquidación", "Fecha prevista", "Esperado DOP", "Cuenta (alias)", "Referencia bancaria", "Fecha banco", "Recibido DOP", "Diferencia DOP", "Estado"],
+        ...rows.map(row => [row.provider, row.settlement_ref, row.expected_date, Number(row.expected_cents) / 100,
+          row.bank_account, row.bank_ref, row.bank_date, row.received_cents == null ? "" : Number(row.received_cents) / 100,
+          row.received_cents == null ? "" : (Number(row.received_cents) - Number(row.expected_cents)) / 100,
+          row.received_cents == null ? "Pendiente" : Number(row.received_cents) === Number(row.expected_cents) ? "Conciliado" : "Con diferencia"]),
+      ]);
+      return;
+    }
+    res.json({ records: rows, total: Number(rows[0]?.total ?? 0) });
+  } catch {
+    res.status(500).json({ error: "No se pudo consultar las liquidaciones." });
+  }
+});
+
+adminRouter.post("/bank-settlements", async (req: AuthenticatedRequest, res) => {
+  const { provider, reference, date, cents } = req.body;
+  const settlementRef = bankText(reference, 100);
+  const expectedDate = bankDate(date);
+  if (!["CardNET", "AZUL", "PORTAL", "Otro"].includes(provider) || !settlementRef || !expectedDate ||
+      !Number.isSafeInteger(cents) || cents <= 0 || cents > 99999999999) {
+    res.status(400).json({ error: "Revisa el proveedor, la referencia, la fecha y el importe esperado." });
+    return;
+  }
+  try {
+    const id = crypto.randomUUID();
+    await db.transaction(async tx => {
+      await tx.query("INSERT INTO bank_settlements (id, provider, settlement_ref, expected_date, expected_cents) VALUES ($1,$2,$3,$4,$5)",
+        [id, provider, settlementRef, expectedDate, cents]);
+      await tx.query("INSERT INTO audit_logs (id, actor_id, event_type, target_table, target_id, details) VALUES ($1,$2,'SETTLEMENT_RECORDED','bank_settlements',$3,$4)",
+        ["aud_" + crypto.randomUUID(), req.user!.id, id, JSON.stringify({ provider, settlementRef, expectedDate, cents })]);
+    });
+    res.status(201).json({ id });
+  } catch (error: any) {
+    res.status(error?.code === "23505" ? 409 : 500).json({ error: error?.code === "23505" ? "Esa liquidación ya está registrada." : "No se pudo registrar la liquidación." });
+  }
+});
+
+adminRouter.put("/bank-settlements/:id", async (req: AuthenticatedRequest, res) => {
+  const { account, reference, date, cents } = req.body;
+  const bankAccount = bankText(account, 80);
+  const bankRef = bankText(reference, 100);
+  const receivedDate = bankDate(date);
+  if (!bankAccount || !bankRef || !receivedDate || !Number.isSafeInteger(cents) || cents <= 0 || cents > 99999999999) {
+    res.status(400).json({ error: "Revisa los datos del abono según el extracto bancario." });
+    return;
+  }
+  try {
+    const matched = await db.transaction(async tx => {
+      const { rows } = await tx.query(
+        `UPDATE bank_settlements SET bank_account = $2, bank_ref = $3, bank_date = $4, received_cents = $5
+         WHERE id::text = $1 AND received_cents IS DISTINCT FROM expected_cents RETURNING expected_cents`,
+        [req.params.id, bankAccount, bankRef, receivedDate, cents],
+      );
+      if (!rows.length) return null;
+      await tx.query("INSERT INTO audit_logs (id, actor_id, event_type, target_table, target_id, details) VALUES ($1,$2,'SETTLEMENT_BANK_REVIEWED','bank_settlements',$3,$4)",
+        ["aud_" + crypto.randomUUID(), req.user!.id, req.params.id, JSON.stringify({ bankAccount, bankRef, receivedDate, cents })]);
+      return Number(rows[0].expected_cents) === cents;
+    });
+    if (matched === null) {
+      res.status(409).json({ error: "La liquidación ya fue conciliada o no existe." });
+      return;
+    }
+    res.json({ matched });
+  } catch (error: any) {
+    res.status(error?.code === "23505" ? 409 : 500).json({ error: error?.code === "23505" ? "Ese abono bancario ya está registrado." : "No se pudo guardar el abono." });
   }
 });
 

@@ -1,14 +1,8 @@
 import { useEffect, useState } from "react";
+import { BankReconciliation } from "./BankReconciliation";
+import { contractAccounts as accounts } from "../services/contractAccounts";
 import { api } from "../services/api";
 
-const accounts = {
-  escrow_hold: ["Retención", "Saldo de clientes", "Fondos de clientes retenidos"],
-  escrow_release: ["Abono al especialista", "Fondos de clientes retenidos", "Saldo de especialistas"],
-  fee_deduction: ["Comisión", "Fondos de clientes retenidos", "Ingreso por comisiones"],
-  refund: ["Reembolso del contrato", "Fondos de clientes retenidos", "Saldo de clientes"],
-  penalty: ["Compensación al especialista", "Fondos de clientes retenidos", "Saldo de especialistas"],
-  cancellation_income: ["Ingreso por cancelación", "Fondos de clientes retenidos", "Ingreso por cancelaciones"],
-} as const;
 type Amount = number | string;
 type Summary = {
   entry_count: Amount; commission: Amount; held: Amount; credited_to_specialists: Amount; refunded: Amount;
@@ -25,6 +19,7 @@ export function AccountingDashboard() {
   const [data, setData] = useState<Summary | null>(null);
   const [page, setPage] = useState(1);
   const [error, setError] = useState("");
+  const [downloadError, setDownloadError] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -46,7 +41,14 @@ export function AccountingDashboard() {
   }, [page]);
 
   return <section className="space-y-3 rounded-xl border border-slate-700 p-4" aria-label="Control financiero">
-    <h2 className="text-lg font-bold text-amber-300">Control financiero</h2>
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <h2 className="text-lg font-bold text-amber-300">Control financiero</h2>
+      <button className={button} onClick={() => {
+        setDownloadError("");
+        void api.admin.downloadFinance("accounting").catch(error => setDownloadError(error.message));
+      }}>Descargar informe financiero (CSV)</button>
+    </div>
+    {downloadError && <p role="status">{downloadError}</p>}
     {error && <p role="status" className="text-amber-300">{error}</p>}
     {!data && !error && <p role="status">Cargando movimientos…</p>}
     {data && <>
@@ -88,5 +90,6 @@ export function AccountingDashboard() {
         <button className={button} disabled={page * 25 >= Number(data.entry_count)} onClick={() => setPage(value => value + 1)}>Siguiente</button>
       </div>
     </>}
+    <BankReconciliation />
   </section>;
 }

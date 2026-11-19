@@ -458,6 +458,28 @@ export const api = {
   },
 
   admin: {
+    async getBankSettlements(page: number, signal?: AbortSignal) {
+      const res = await fetch(`${API_BASE}/admin/bank-settlements?page=${page}`, { headers: getAuthHeader(), signal });
+      return handleResponse(res, "No se pudieron cargar las liquidaciones.");
+    },
+    async saveBankSettlement(id: string | null, payload: Record<string, string | number>) {
+      const res = await fetch(`${API_BASE}/admin/bank-settlements${id ? `/${encodeURIComponent(id)}` : ""}`, {
+        method: id ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeader() },
+        body: JSON.stringify(payload),
+      });
+      return handleResponse(res, "No se pudo guardar la liquidación.");
+    },
+    async downloadFinance(report: "accounting" | "bank-settlements") {
+      const res = await fetch(`${API_BASE}/admin/${report}?format=csv`, { headers: getAuthHeader() });
+      if (!res.ok) throw new Error("No se pudo descargar el informe.");
+      const url = URL.createObjectURL(await res.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = report === "accounting" ? "diclik-informe-financiero.csv" : "diclik-conciliacion-bancaria.csv";
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    },
     async getAccounting(page: number, signal: AbortSignal) {
       const res = await fetch(`${API_BASE}/admin/accounting?page=${page}`, { headers: getAuthHeader(), signal });
       return handleResponse(res, "No se pudo consultar el registro financiero.");
