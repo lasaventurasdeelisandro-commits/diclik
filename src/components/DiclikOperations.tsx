@@ -23,6 +23,13 @@ const statusLabel: Record<string, string> = {
   accepted: "Aceptada", rejected: "Rechazada",
 };
 
+function radarMapUrl(center: GPS): string {
+  const lat = Math.max(-84.9, Math.min(84.9, Math.round(center.lat * 100) / 100));
+  const lng = Math.max(-179.9, Math.min(179.9, Math.round(center.lng * 100) / 100));
+  const bbox = [lng - 0.05, lat - 0.035, lng + 0.05, lat + 0.035].join(",");
+  return `https://www.openstreetmap.org/export/embed.html?${new URLSearchParams({ bbox, layer: "mapnik" })}`;
+}
+
 function position(): Promise<GPS> {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
@@ -66,6 +73,7 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest }:
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [scanned, setScanned] = useState(false);
+  const [radarCenter, setRadarCenter] = useState<GPS | null>(null);
   const [adminUsers, setAdminUsers] = useState<{ id: string; email: string; role: string; status: string }[]>([]);
   const [disputes, setDisputes] = useState<{ id: string; reason: string; status: string }[]>([]);
   const isClient = user?.role === "cliente";
@@ -174,8 +182,22 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest }:
     {list}
     {view === "radar" && <>
       <h2 className="font-bold text-emerald-300">Radar GPS</h2>
+      <figure className={card}>
+        <iframe
+          title="Mapa del radar GPS"
+          src={radarMapUrl(radarCenter ?? { lat: 18.48, lng: -69.94 })}
+          className="h-64 w-full rounded-xl border border-slate-700"
+          loading="lazy"
+          referrerPolicy="no-referrer"
+        />
+        <figcaption className="text-slate-300">
+          {radarCenter ? "Zona aproximada de tu ubicación" : "Vista inicial de Santo Domingo"}
+        </figcaption>
+      </figure>
       <button className={button} disabled={busy} onClick={() => run(async () => {
-        setSpecialists(await api.radar.scan({ ...await position(), radius: 15 }));
+        const center = await position();
+        setRadarCenter(center);
+        setSpecialists(await api.radar.scan({ ...center, radius: 15 }));
         setScanned(true);
       })}>Buscar cerca de mi ubicación</button>
       {scanned && !specialists.length && <p>No hay especialistas disponibles en el radio consultado.</p>}
