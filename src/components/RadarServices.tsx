@@ -1,4 +1,4 @@
-import { Sparkles, Wrench } from "lucide-react";
+import { MapPin, Sparkles, Wrench } from "lucide-react";
 
 export type RadarSpecialist = {
   id: string;
@@ -35,8 +35,17 @@ export function RadarGrid({ specialists, selected, onSelect, hasLocation }: {
     {[22, 47, 72].map(size => <div key={size} aria-hidden="true"
       className="pointer-events-none absolute left-1/2 top-1/2 aspect-square -translate-x-1/2 -translate-y-1/2 rounded-full border border-emerald-400/15"
       style={{ width: `${size}%` }} />)}
-    <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-center">
-      <span aria-hidden="true" className="mx-auto block size-4 rounded-full border-2 border-amber-300 bg-amber-400/30 shadow-[0_0_18px_#fbbf2460]" />
+    <div aria-hidden="true" className="pointer-events-none absolute inset-0 grid place-items-center">
+      <div className="radar-sweep h-full w-full motion-safe:animate-spin"
+        style={{
+          animationDuration: "4s",
+          background: "conic-gradient(from 0deg at 50% 50%, #34d399aa 0deg, #10b98144 1deg, transparent 62deg)",
+        }} />
+    </div>
+    <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-center">
+      <span aria-hidden="true" className="mx-auto grid size-7 place-items-center rounded-full bg-amber-400 text-slate-950 ring-4 ring-amber-400/30">
+        <MapPin className="size-4" />
+      </span>
       <span className="mt-1 block rounded-full border border-amber-500/25 bg-slate-950 px-2 py-0.5 text-[10px] font-bold text-amber-300">
         {hasLocation ? "Tu zona" : "Santo Domingo"}
       </span>

@@ -1,5 +1,4 @@
 import { FormEvent, lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { INITIAL_CATEGORIES } from "../data";
 import type { RadarPoint } from "./RadarMap";
 import { RadarGrid, RadarServiceCard, type RadarSort, type RadarSpecialist } from "./RadarServices";
 import { api } from "../services/api";
@@ -259,10 +258,6 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest }:
       {sortedSpecialists.map(item => <div key={item.id}>
         <RadarServiceCard specialist={item} selected={radarSelected === item.id} onSelect={() => setRadarSelected(item.id)} />
       </div>)}
-      <h3 className="font-bold text-amber-300">Categorías de servicios</h3>
-      <ul className="grid grid-cols-2 gap-2">
-        {INITIAL_CATEGORIES.map(category => <li className={card} key={category.id}>{category.name}</li>)}
-      </ul>
     </>}
     {view === "contracts" && <>
       <h2 className="font-bold text-amber-300">Contratos y rastreo</h2>
