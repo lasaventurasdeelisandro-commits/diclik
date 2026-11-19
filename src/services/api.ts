@@ -458,6 +458,10 @@ export const api = {
   },
 
   admin: {
+    async getAccounting(page: number, signal: AbortSignal) {
+      const res = await fetch(`${API_BASE}/admin/accounting?page=${page}`, { headers: getAuthHeader(), signal });
+      return handleResponse(res, "No se pudo consultar el registro financiero.");
+    },
     async getOperations(page: number, signal: AbortSignal) {
       const res = await fetch(`${API_BASE}/admin/operations?page=${page}`, { headers: getAuthHeader(), signal });
       return handleResponse(res, "No se pudo cargar el panel de operaciones.");

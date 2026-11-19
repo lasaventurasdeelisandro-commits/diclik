@@ -94,6 +94,45 @@ adminRouter.get("/operations", async (req, res) => {
   }
 });
 
+// Operational journal derived from recorded movements. Bank cash requires separate reconciliation.
+adminRouter.get("/accounting", async (req, res) => {
+  const page = Number(req.query.page ?? 1);
+  if (!Number.isSafeInteger(page) || page < 1 || page > 1000000) {
+    res.status(400).json({ error: "Página inválida." });
+    return;
+  }
+  try {
+    const result = await db.query(
+      `WITH entries AS (
+        SELECT id, contract_id, created_at, type, ROUND(amount::numeric, 2) AS amount
+        FROM financial_transactions
+        WHERE status = 'completed' AND contract_id IS NOT NULL AND amount > 0
+          AND type IN ('escrow_hold','escrow_release','fee_deduction','refund','penalty')
+        UNION ALL
+        SELECT id, contract_id, created_at, 'cancellation_income', ROUND(platform_earnings::numeric, 2)
+        FROM contract_cancellations WHERE platform_earnings > 0
+      ), recent AS (
+        SELECT * FROM entries ORDER BY created_at DESC, id DESC LIMIT 25 OFFSET $1
+      )
+      SELECT
+        (SELECT COUNT(*) FROM entries) AS entry_count,
+        (SELECT COALESCE(json_agg(recent ORDER BY created_at DESC, id DESC), '[]'::json) FROM recent) AS entries,
+        (SELECT COALESCE(SUM(amount),0) FROM entries WHERE type = 'fee_deduction') AS commission,
+        (SELECT COALESCE(SUM(amount),0) FROM entries WHERE type = 'cancellation_income') AS cancellation_income,
+        (SELECT COALESCE(SUM(amount),0) FROM entries WHERE type IN ('escrow_release', 'penalty')) AS credited_to_specialists,
+        (SELECT COALESCE(SUM(amount),0) FROM entries WHERE type = 'refund') AS refunded,
+        (SELECT COALESCE(SUM(amount::numeric),0) FROM escrow_holds WHERE status = 'locked') AS held,
+        (SELECT COALESCE(SUM(agreed_price::numeric),0) FROM contracts WHERE status = 'completed') AS completed_volume,
+        (SELECT COUNT(*) FROM contracts WHERE status = 'completed') AS completed_count`,
+      [(page - 1) * 25],
+    );
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json({ ...result.rows[0], currency: "DOP", bank_pending: null, bank_confirmed: null, updated_at: new Date().toISOString() });
+  } catch {
+    res.status(500).json({ error: "No se pudo consultar el registro financiero." });
+  }
+});
+
 // GET /api/v1/admin/users
 adminRouter.get("/users", async (req: AuthenticatedRequest, res: Response) => {
   try {

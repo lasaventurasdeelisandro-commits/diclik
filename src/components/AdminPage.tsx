@@ -3,6 +3,7 @@ import { api } from "../services/api";
 import type { AuthUserSummary } from "./DiclikAccountModal";
 import { DiclikOperations } from "./DiclikOperations";
 import { CommissionPreview } from "./CommissionPreview";
+import { AccountingDashboard } from "./AccountingDashboard";
 import { AdminDashboard } from "./AdminDashboard";
 import { AccreditationReview } from "./Accreditation";
 
@@ -42,6 +43,7 @@ export default function AdminPage() {
       </header>
       {user ? <>
         <AdminDashboard />
+        <AccountingDashboard />
         <CommissionPreview />
         <AccreditationReview />
         <DiclikOperations view="requests" role="cliente" user={user} onSignIn={() => setUser(null)} onContractAccepted={() => {}} />
