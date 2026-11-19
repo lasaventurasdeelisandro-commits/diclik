@@ -80,6 +80,7 @@ export default function App() {
               </li>
             ))}
           </ul>
+          <p className="mt-5 text-center text-xs text-slate-400">Creado por Elisandro Álvarez</p>
         </section>
       </div>
     </main>

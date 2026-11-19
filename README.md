@@ -2,6 +2,8 @@
 
 Aplicación web y Android para solicitudes de servicios, ofertas, contratación, mensajería y gestión de contratos.
 
+Creado por Elisandro Álvarez.
+
 ## Desarrollo y pruebas
 
 Requiere Node.js 22.12 o superior y npm. Desde la raíz del proyecto:
