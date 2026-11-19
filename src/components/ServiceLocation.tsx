@@ -7,14 +7,18 @@ const noSelection = () => {};
 
 export type ServicePoint = { lat: number; lng: number };
 
-export function ServiceLocation({ point, onChange }: {
+export function ServiceLocation({ address, point, confirmed, onChange, onConfirm }: {
+  address: string;
   point: ServicePoint | null;
+  confirmed: boolean;
   onChange: (point: ServicePoint) => void;
+  onConfirm: () => void;
 }) {
   const [showMap, setShowMap] = useState(false);
   const [locating, setLocating] = useState(false);
   const [message, setMessage] = useState("");
 
+  const displayAddress = address.trim();
   const points = useMemo(() => point ? [{ ...point, id: "service", label: "Lugar del servicio" }] : [], [point]);
   const selectPoint = useCallback((next: ServicePoint) => {
     setMessage("");
@@ -45,14 +49,23 @@ export function ServiceLocation({ point, onChange }: {
       </button>
     </div>
     <p role="status" className="text-slate-300">
-      {message || (point ? "Ubicación vinculada. Revisa que el punto coincida con la dirección." : "Marca el lugar del servicio para vincularlo con la dirección.")}
+      {message || (confirmed ? "Dirección y punto confirmados." : point
+        ? "Revisa que el marcador esté en la entrada del lugar y confirma el punto."
+        : "Si estás en el lugar del servicio, usa tu GPS. También puedes marcar la entrada en el mapa.")}
     </p>
-    {showMap && <Suspense fallback={<p>Cargando mapa…</p>}>
-      <RadarMap center={point ?? initialCenter}
-        points={points}
-        selected={point ? "service" : null} onSelect={noSelection}
-        onMapClick={selectPoint}
-        label="Mapa para marcar el lugar del servicio" />
-    </Suspense>}
+    {showMap && <div className="space-y-2 rounded-xl border border-slate-700 p-2">
+      <p className="break-words text-slate-100"><strong>Dirección del servicio</strong><br />{displayAddress || "Escribe la dirección arriba."}</p>
+      <Suspense fallback={<p>Cargando mapa…</p>}>
+        <RadarMap center={point ?? initialCenter}
+          points={points}
+          selected={point ? "service" : null} onSelect={noSelection}
+          onMapClick={selectPoint}
+          label="Mapa para marcar el lugar del servicio" />
+      </Suspense>
+      <button type="button" disabled={!displayAddress || !point || confirmed || locating} onClick={onConfirm}
+        className="rounded-lg bg-amber-400 px-3 py-2 font-bold text-slate-950 disabled:bg-slate-800 disabled:text-slate-300">
+        {confirmed ? "Punto confirmado" : "Confirmar punto del servicio"}
+      </button>
+    </div>}
   </div>;
 }

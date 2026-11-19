@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { ServiceLocation, type ServicePoint } from "./ServiceLocation";
 import { DiclikOperations } from "./DiclikOperations";
 import { api } from "../services/api.ts";
@@ -1507,6 +1507,11 @@ export function DirectoMobileApp({
   const [clientPriceStrategy, setClientPriceStrategy] = useState<"intemperie" | "minimo">("intemperie");
   const [clientMinBudget, setClientMinBudget] = useState<string>("2400");
   const [servicePoint, setServicePoint] = useState<ServicePoint | null>(null);
+  const [servicePointConfirmed, setServicePointConfirmed] = useState(false);
+  const updateServicePoint = useCallback((point: ServicePoint) => {
+    setServicePoint(point);
+    setServicePointConfirmed(false);
+  }, []);
   const [clientAddressInput, setClientAddressInput] = useState<string>(isDemo ? "Av. Winston Churchill #402, Piantini, Santo Domingo" : "");
   const [clientUrgency, setClientUrgency] = useState<"urgente" | "express" | "programado">("urgente");
 
@@ -1685,8 +1690,8 @@ export function DirectoMobileApp({
         return;
       }
       if (publicationPending.current) return;
-      if (!clientAddressInput.trim() || !servicePoint) {
-        setPublicationMessage("Escribe la dirección y marca el lugar del servicio con el GPS o en el mapa.");
+      if (!clientAddressInput.trim() || !servicePoint || !servicePointConfirmed) {
+        setPublicationMessage("Escribe la dirección y confirma el punto del servicio en el mapa.");
         return;
       }
       publicationPending.current = true;
@@ -2498,12 +2503,14 @@ export function DirectoMobileApp({
                   type="text"
                   aria-label="Dirección del servicio"
                   value={clientAddressInput}
-                  onChange={(e) => { setClientAddressInput(e.target.value); setServicePoint(null); }}
+                  onChange={(e) => { setClientAddressInput(e.target.value); setServicePoint(null); setServicePointConfirmed(false); }}
                   className="w-full bg-slate-950/80 border border-slate-700 rounded-xl px-3 py-2 text-[11px] text-slate-200 focus:outline-none focus:border-amber-400 font-medium"
                 />
               </div>
 
-              {!isDemo && <ServiceLocation point={servicePoint} onChange={setServicePoint} />}
+              {!isDemo && <ServiceLocation address={clientAddressInput} point={servicePoint} confirmed={servicePointConfirmed}
+                onChange={updateServicePoint}
+                onConfirm={() => { setServicePointConfirmed(true); setPublicationMessage(""); }} />}
 
               {/* PRIMARY CTA BUTTON: SOLICITAR SERVICIO Y ABRIR RADAR DE NEGOCIACIÓN */}
               <button

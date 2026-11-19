@@ -1,6 +1,6 @@
 ALTER TABLE service_requests ALTER COLUMN lat DROP DEFAULT;
 ALTER TABLE service_requests ALTER COLUMN lng DROP DEFAULT;
-ALTER TABLE service_requests ADD COLUMN location_confirmed BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE service_requests ADD COLUMN IF NOT EXISTS location_confirmed BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- Older clients sent no location and the server supplied this exact pair.
 UPDATE service_requests

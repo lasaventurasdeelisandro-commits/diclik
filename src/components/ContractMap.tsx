@@ -78,13 +78,13 @@ export function ContractMap({ contractId, isClient, address }: {
   }
 
   const destination = positions?.destination;
-  const directions = new URLSearchParams({ api: "1", destination: destination ? `${destination.lat},${destination.lng}` : address });
+  const directions = destination ? new URLSearchParams({ api: "1", destination: `${destination.lat},${destination.lng}` }) : null;
   const specialist = positions?.specialist;
-  if (specialist) directions.set("origin", `${specialist.lat},${specialist.lng}`);
+  if (isClient && specialist) directions?.set("origin", `${specialist.lat},${specialist.lng}`);
 
   return <section aria-label="Seguimiento del contrato" className="space-y-2">
     <h4 className="font-bold text-amber-200">Mapa del servicio</h4>
-    {address && <p>{address}</p>}
+    {address && <p className="break-words"><strong>Dirección del servicio</strong><br />{address}</p>}
     {points.length > 0 && <Suspense fallback={<p role="status">Cargando mapa…</p>}>
       <RadarMap center={points[0]} points={points} selected={null} onSelect={noSelection} connect label="Mapa del contrato" />
     </Suspense>}
@@ -101,7 +101,7 @@ export function ContractMap({ contractId, isClient, address }: {
         className="rounded-lg border border-amber-400/50 px-2.5 py-1.5 font-bold text-amber-200 disabled:opacity-50">
         {isClient ? (destination ? "Actualizar punto del servicio" : "Fijar punto del servicio con GPS") : (specialist ? "Actualizar mi GPS" : "Compartir ubicación")}
       </button>
-      {(destination || (!isClient && address)) && <a
+      {directions && <a
         className="rounded-lg border border-slate-500 px-2.5 py-1.5 font-bold text-white"
         target="_blank" rel="noreferrer" href={`https://www.google.com/maps/dir/?${directions}`}>
         Abrir ruta por calles
