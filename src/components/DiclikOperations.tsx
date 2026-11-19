@@ -10,7 +10,11 @@ const RadarMap = lazy(() => import("./RadarMap").then(module => ({ default: modu
 
 type Role = "cliente" | "tecnico" | "profesional";
 type View = "requests" | "radar" | "contracts" | "chat";
-type RequestRow = { id: string; client_id?: string; title: string; description: string; status: string; address?: string; photos?: string[] };
+type RequestRow = { id: string; client_id?: string; target_role?: Role; title: string; description: string; status: string; address?: string; photos?: string[] };
+type RadarRequest = {
+  id: string; title: string; status: string; category: string | null;
+  approxLat: number; approxLng: number; min_budget: number; distanceKm: number;
+};
 type Offer = { id: string; pro_name: string; professional_id: string; price: number; counter_price?: number; counter_proposed_by?: string; message: string; status: string };
 type Contract = { completed_at?: string; pro_name?: string; agreed_price: number; commission_rate: number; platform_fee: number; professional_payout: number; id: string; request_title: string; status: string; address: string; otp_code?: string; professional_id: string; client_id: string };
 type Conversation = { id: string; client_id: string; request_title: string; client_name: string; pro_name: string };
@@ -52,16 +56,21 @@ function AmountForm({ label, onSubmit, disabled }: {
   </form>;
 }
 
-export function DiclikOperations({ view, user, role, onSignIn, initialRequest, onContractAccepted, onWorkAlert }: {
-  view: View; user: AuthUserSummary | null; role: Role; onSignIn: () => void; initialRequest?: string; onContractAccepted: () => void; onWorkAlert?: (event: WorkAlert, text: string) => void;
+export function DiclikOperations({ view, user, role, onSignIn, initialRequest, onContractAccepted, onWorkAlert, onOpenRadarRequest }: {
+  view: View; user: AuthUserSummary | null; role: Role; onSignIn: () => void; initialRequest?: string; onContractAccepted: () => void; onWorkAlert?: (event: WorkAlert, text: string) => void; onOpenRadarRequest?: (id: string) => void;
 }) {
   const [requests, setRequests] = useState<RequestRow[]>([]);
-  const [offers, setOffers] = useState<Offer[]>([]);
+  const [requestsLoaded, setRequestsLoaded] = useState(false);
+  const [offerResult, setOfferResult] = useState<{ id: string; rows: Offer[] } | null>(null);
+  const [offerPanel, setOfferPanel] = useState(role === "cliente" && Boolean(initialRequest));
   const [selection, setSelection] = useState(initialRequest || "");
+  const offers = offerResult?.id === selection ? offerResult.rows : [];
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [specialists, setSpecialists] = useState<RadarSpecialist[]>([]);
+  const [radarRequests, setRadarRequests] = useState<RadarRequest[]>([]);
+  const [radarRevision, setRadarRevision] = useState(0);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -77,18 +86,28 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
     return (a.basePrice ?? Infinity) - (b.basePrice ?? Infinity);
   }), [specialists, radarSort]);
   const mapCenter = radarCenter ?? initialRadarCenter;
-  const radarPoints: RadarPoint[] = useMemo(() => sortedSpecialists
-    .filter(item => Number.isFinite(item.latOffset) && Number.isFinite(item.lngOffset))
-    .map(item => ({
+  const isClient = role === "cliente";
+  const radarMarkers = useMemo(() => isClient ? sortedSpecialists : radarRequests.map(item => ({
+    id: item.id,
+    name: item.title,
+    trade: item.category || "Solicitud",
+    distanceKm: item.distanceKm,
+    basePrice: item.min_budget,
+    latOffset: 50 + (item.approxLat - approximateCoordinate(mapCenter.lat)) * 111 * 35 / radarRadius,
+    lngOffset: 50 + (item.approxLng - approximateCoordinate(mapCenter.lng)) * 111 * 35 / radarRadius,
+  })), [isClient, sortedSpecialists, radarRequests, mapCenter]);
+  const radarPoints: RadarPoint[] = useMemo(() => isClient
+    ? sortedSpecialists.filter(item => Number.isFinite(item.latOffset) && Number.isFinite(item.lngOffset)).map(item => ({
       id: item.id,
       label: `${item.trade} · ${item.name}`,
       lat: approximateCoordinate(mapCenter.lat + (item.latOffset - 50) * radarRadius / (35 * 111)),
       lng: approximateCoordinate(mapCenter.lng + (item.lngOffset - 50) * radarRadius / (35 * 111)),
-    })), [sortedSpecialists, mapCenter]);
+    }))
+    : radarRequests.map(item => ({ id: item.id, label: item.title, lat: item.approxLat, lng: item.approxLng })),
+  [isClient, sortedSpecialists, radarRequests, mapCenter]);
 
   const [adminUsers, setAdminUsers] = useState<{ id: string; email: string; role: string; status: string }[]>([]);
   const [disputes, setDisputes] = useState<{ id: string; reason: string; status: string }[]>([]);
-  const isClient = role === "cliente";
   const isAdmin = user?.role === "admin";
   const canQuote = !isClient && user?.role === role;
 
@@ -99,8 +118,20 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
       setDisputes(Array.isArray(claims) ? claims : []);
     } else if (view === "requests") {
       const rows: RequestRow[] = await api.services.list(isClient ? (user ? { clientId: user.id } : undefined) : { targetRole: role });
-      setRequests(isClient ? rows : rows.filter(row => ["open", "negotiating"].includes(row.status)));
-      if (selection && user) setOffers(await api.services.getOffers(selection));
+      const visible = isClient ? rows : rows.filter(row => ["open", "negotiating"].includes(row.status));
+      if (initialRequest && !visible.some(row => row.id === initialRequest)) {
+        const selected: RequestRow | null = await api.services.getById(initialRequest).catch(() => null);
+        if (selected && (isClient ? selected.client_id === user?.id :
+          selected.target_role === role && ["open", "negotiating"].includes(selected.status))) {
+          visible.unshift(selected);
+        }
+      }
+      setRequests(visible);
+      setRequestsLoaded(true);
+      if (selection && user) {
+        const rows: Offer[] = await api.services.getOffers(selection);
+        setOfferResult({ id: selection, rows });
+      }
     } else if (view === "contracts" && user) {
       setContracts(await api.services.listContracts());
     } else if (view === "chat" && user) {
@@ -114,21 +145,37 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
   }, [view, user?.id, role, selection]);
 
   useEffect(() => {
+    if (view !== "requests" || !isClient || !user?.id || !selection || busy) return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    async function updateOffers() {
+      try {
+        const rows: Offer[] = await api.services.getOffers(selection, controller.signal);
+        if (!controller.signal.aborted) setOfferResult({ id: selection, rows });
+      } catch {
+        // Keep the current offers until the next refresh.
+      }
+      if (!controller.signal.aborted) timer = setTimeout(updateOffers, 8000);
+    }
+    timer = setTimeout(updateOffers, 8000);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [view, isClient, user?.id, selection, busy]);
+
+  useEffect(() => {
     if (view !== "radar") return;
     let current = true;
     setRadarError(false);
     setScanned(false);
     setSpecialists([]);
+    setRadarRequests([]);
     setRadarSelected(null);
-    api.radar.scan({ ...mapCenter, radius: radarRadius }).then((rows: RadarSpecialist[]) => {
-      if (!current) return;
-      setSpecialists(rows);
-      setScanned(true);
-    }).catch(() => {
-      if (current) setRadarError(true);
-    });
+    const scan = role === "cliente"
+      ? api.radar.scan({ ...mapCenter, radius: radarRadius }).then(rows => { if (current) setSpecialists(rows); })
+      : api.radar.scanRequests(role, mapCenter, radarRadius).then(rows => { if (current) setRadarRequests(rows); });
+    scan.then(() => { if (current) setScanned(true); })
+      .catch(() => { if (current) setRadarError(true); });
     return () => { current = false; };
-  }, [view, mapCenter]);
+  }, [view, role, mapCenter, radarRevision]);
 
   async function run(task: () => Promise<void>, success?: string) {
     setBusy(true);
@@ -144,9 +191,11 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
     }
   }
 
+  const visibleRequests = offerPanel ? requests.filter(row => row.id === initialRequest) : requests;
   const list = view === "requests" && (
     <>
-      <h2 className="font-bold text-amber-300">{isAdmin ? "Administración" : isClient ? "Mis solicitudes y ofertas" : "Solicitudes disponibles"}</h2>
+      <h2 className="font-bold text-amber-300">{isAdmin ? "Administración" : offerPanel ? "Ofertas de tu solicitud" : isClient ? "Mis solicitudes y ofertas" : "Solicitudes disponibles"}</h2>
+      {offerPanel && <button type="button" className={button} onClick={() => { setOfferPanel(false); setSelection(""); }}>Ver todas mis solicitudes</button>}
       {isAdmin ? <>
         <h3 className="font-bold">Usuarios</h3>
         {adminUsers.map(item => <div className={card} key={item.id}>
@@ -169,18 +218,27 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
             }, "Disputa resuelta.")}>{decision === "refund_client" ? "Reembolsar al cliente" : "Liberar al especialista"}</button>)}
           </div>}
         </div>)}
-      </> : requests.length ? requests.map(row => <article key={row.id} className={card}>
+      </> : visibleRequests.length ? visibleRequests.map(row => <article key={row.id} className={card}>
         <h3 className="font-bold">{row.title}</h3>
         <p>{row.description}</p>
         <p className="text-slate-300">{statusLabel[row.status] || row.status}</p>
-        <button className={button} onClick={() => { setOffers([]); setSelection(id => id === row.id ? "" : row.id); }}>Ver ofertas</button>
+        {!offerPanel && <button className={button} onClick={() => {
+          setOfferResult(null);
+          setSelection(id => id === row.id ? "" : row.id);
+        }}>Ver ofertas</button>}
         {selection === row.id && <>
+          {isClient && user && (offerResult?.id !== row.id
+            ? <p role="status" className="text-slate-300">Consultando ofertas…</p>
+            : <p role="status" className="text-slate-300">{offers.length
+                ? `${offers.length} ${offers.length === 1 ? "propuesta recibida" : "propuestas recibidas"}`
+                : ["open", "negotiating"].includes(row.status) ? "Esperando cotizaciones. Las ofertas aparecerán aquí." : "Esta solicitud no tiene ofertas."}</p>)}
           {row.photos?.filter(url => /^(https:\/\/|data:image\/(jpeg|png|webp|gif);base64,)/.test(url)).map((url, index) =>
             <img key={index} src={url} alt={`Foto de la solicitud ${index + 1}`} className="max-h-32 rounded-lg object-contain" />
           )}
           {offers.filter(offer => (isClient && row.client_id === user?.id) || offer.professional_id === user?.id).map(offer => <div key={offer.id} className={card}>
             <p>{offer.pro_name} · RD$ {offer.counter_price || offer.price} · {statusLabel[offer.status] || offer.status}</p>
             <p>{offer.message}</p>
+            {isClient && offer.status === "accepted" && <button type="button" className={button} onClick={onContractAccepted}>Ver contrato</button>}
             {["pending", "countered"].includes(offer.status) && <>
               <AmountForm label="Contraofertar" disabled={busy} onSubmit={amount => run(async () => {
                 await api.services.counterOffer(offer.id, amount); await refresh();
@@ -202,7 +260,7 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
             await api.services.remove(row.id); await refresh();
           }, "Solicitud cancelada.")}>Cancelar solicitud</button>}
         </>}
-      </article>) : <p>No hay solicitudes para mostrar.</p>}
+      </article>) : <p>{offerPanel && !requestsLoaded && !notice ? "Cargando tu solicitud…" : "No hay solicitudes para mostrar."}</p>}
     </>
   );
 
@@ -225,32 +283,47 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
             points={radarPoints}
             selected={radarSelected}
             onSelect={setRadarSelected}
+            label={isClient ? "Mapa de especialistas" : "Mapa de solicitudes"}
           />
-        </Suspense> : <RadarGrid specialists={sortedSpecialists} selected={radarSelected}
+        </Suspense> : <RadarGrid specialists={radarMarkers} requestMode={!isClient} selected={radarSelected}
           onSelect={setRadarSelected} hasLocation={Boolean(radarCenter)} />}
         <figcaption className="text-slate-300">
           {radarCenter ? "Zona aproximada de tu ubicación" : "Vista inicial de Santo Domingo"}
           {radarPoints.length > 0 && " · Marcadores aproximados"}
         </figcaption>
       </figure>
-      <button className={button} disabled={busy} onClick={() => run(async () => {
-        setRadarCenter(await getCurrentLocation());
-      })}>Buscar cerca de mi ubicación</button>
-      <div id="radar-resultados" className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="font-extrabold text-white">Especialistas disponibles</h3>
-        <div className="flex gap-1 rounded-xl border border-slate-700 bg-slate-800 p-1" aria-label="Ordenar especialistas">
-          {([["precio", "Precio"], ["rapido", "Rápido"], ["rating", "Rating"]] as const).map(([sort, label]) =>
-            <button key={sort} type="button" aria-pressed={radarSort === sort}
-              className={`rounded-lg px-2 py-1 text-xs font-bold ${radarSort === sort ? "bg-emerald-400 text-slate-950" : "text-slate-200"}`}
-              onClick={() => setRadarSort(sort)}>{label}</button>)}
-        </div>
+      <div className="flex flex-wrap gap-2">
+        <button className={button} disabled={busy} onClick={() => run(async () => {
+          setRadarCenter(await getCurrentLocation());
+        })}>Buscar cerca de mi ubicación</button>
+        <button type="button" className={button} onClick={() => setRadarRevision(value => value + 1)}>Actualizar radar</button>
       </div>
-      {radarError && <p role="status">La disponibilidad de especialistas no se puede consultar ahora.</p>}
-      {!scanned && !radarError && <p role="status">Buscando especialistas…</p>}
-      {scanned && !specialists.length && <p>No hay especialistas disponibles en el radio consultado.</p>}
-      {sortedSpecialists.map(item => <div key={item.id}>
-        <RadarServiceCard specialist={item} selected={radarSelected === item.id} onSelect={() => setRadarSelected(item.id)} />
-      </div>)}
+      {radarError && <p role="status">No se pudo actualizar el radar. Intenta de nuevo.</p>}
+      {!scanned && !radarError && <p role="status">{isClient ? "Buscando especialistas…" : "Buscando solicitudes…"}</p>}
+      {isClient ? <>
+        <div id="radar-resultados" className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="font-extrabold text-white">Especialistas disponibles</h3>
+          <div className="flex gap-1 rounded-xl border border-slate-700 bg-slate-800 p-1" aria-label="Ordenar especialistas">
+            {([["precio", "Precio"], ["rapido", "Rápido"], ["rating", "Rating"]] as const).map(([sort, label]) =>
+              <button key={sort} type="button" aria-pressed={radarSort === sort}
+                className={`rounded-lg px-2 py-1 text-xs font-bold ${radarSort === sort ? "bg-emerald-400 text-slate-950" : "text-slate-200"}`}
+                onClick={() => setRadarSort(sort)}>{label}</button>)}
+          </div>
+        </div>
+        {scanned && !specialists.length && <p>No hay especialistas disponibles en el radio consultado.</p>}
+        {sortedSpecialists.map(item => <div key={item.id}>
+          <RadarServiceCard specialist={item} selected={radarSelected === item.id} onSelect={() => setRadarSelected(item.id)} />
+        </div>)}
+      </> : <div id="radar-resultados" className="space-y-2">
+        <h3 className="font-extrabold text-white">{role === "tecnico" ? "Solicitudes para técnicos" : "Solicitudes para profesionales"}</h3>
+        {scanned && !radarRequests.length && <p>No hay solicitudes abiertas para este rol en la zona consultada.</p>}
+        {radarRequests.map(item => <article key={item.id} className={`${card}${item.id === radarSelected ? " ring-2 ring-amber-400" : ""}`}>
+          <h4 className="font-bold text-white">{item.title}</h4>
+          <p className="text-slate-300">{item.category || "Servicio"} · {statusLabel[item.status]} · {item.distanceKm} km aprox.</p>
+          {Number(item.min_budget) > 0 && <p>Presupuesto desde {pesos.format(item.min_budget)}</p>}
+          <button type="button" className={button} onClick={() => onOpenRadarRequest?.(item.id)}>Ver solicitud</button>
+        </article>)}
+      </div>}
     </>}
     {view === "contracts" && <>
       <h2 className="font-bold text-amber-300">Contratos y rastreo</h2>

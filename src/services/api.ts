@@ -217,9 +217,9 @@ export const api = {
       return handleResponse(res, "Error al cancelar servicio");
     },
 
-    async getOffers(serviceId: string) {
+    async getOffers(serviceId: string, signal?: AbortSignal) {
       const res = await fetch(`${API_BASE}/services/${serviceId}/offers`, {
-        headers: { ...getAuthHeader() }
+        headers: { ...getAuthHeader() }, signal
       });
       return handleResponse(res, "Error al obtener ofertas");
     },
@@ -360,6 +360,14 @@ export const api = {
   },
 
   radar: {
+    async scanRequests(role: "tecnico" | "profesional", center: { lat: number; lng: number }, radius: number) {
+      const query = new URLSearchParams({
+        role, lat: center.lat.toFixed(2), lng: center.lng.toFixed(2), radius: String(radius),
+      });
+      const res = await fetch(`${API_BASE}/radar/requests?${query}`);
+      return handleResponse(res, "No se pudieron consultar las solicitudes del radar.");
+    },
+
     async scan(params?: { lat?: number; lng?: number; radius?: number; trade?: string; sort?: string }) {
       const query = new URLSearchParams();
       if (params?.lat !== undefined) query.append("lat", params.lat.toString());

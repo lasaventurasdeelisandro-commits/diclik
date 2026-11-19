@@ -1369,6 +1369,7 @@ export function DirectoMobileApp({
   const [authUser, setAuthUser] = useState<AuthUserSummary | null>(null);
   const clientPortal = mobileRole === "cliente" && authUser?.role !== "admin";
   const [isAccountModalOpen, setIsAccountModalOpen] = useState<boolean>(false);
+  const [radarRequestId, setRadarRequestId] = useState("");
   const [publishedRequestId, setPublishedRequestId] = useState("");
   const [publicationMessage, setPublicationMessage] = useState("");
   const [arrivalNotice, setArrivalNotice] = useState("");
@@ -2245,7 +2246,8 @@ export function DirectoMobileApp({
           <button
             onClick={() => {
               setMobileRole("cliente");
-              setCurrentScreen("home");
+              setRadarRequestId("");
+              setCurrentScreen(screen => screen === "radar" && !isDemo ? "radar" : "home");
               onSpeak("Modo Cliente activado. Puedes buscar cualquier técnico o profesional en el mundo.");
             }}
             className={`px-2 py-1 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer ${
@@ -2257,7 +2259,8 @@ export function DirectoMobileApp({
           <button
             onClick={() => {
               setMobileRole("tecnico");
-              setCurrentScreen("requests_feed");
+              setRadarRequestId("");
+              setCurrentScreen(screen => screen === "radar" && !isDemo ? "radar" : "requests_feed");
               onSpeak("Modo Técnico activado. Mostrando solicitudes de clientes en vivo listas para aceptar.");
             }}
             className={`px-2 py-1 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer ${
@@ -2269,7 +2272,8 @@ export function DirectoMobileApp({
           <button
             onClick={() => {
               setMobileRole("profesional");
-              setCurrentScreen("requests_feed");
+              setRadarRequestId("");
+              setCurrentScreen(screen => screen === "radar" && !isDemo ? "radar" : "requests_feed");
               onSpeak("Modo Profesional activado. Mostrando proyectos de peritaje y dictámenes.");
             }}
             className={`px-2 py-1 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer ${
@@ -2301,7 +2305,8 @@ export function DirectoMobileApp({
             view={currentScreen === "radar" || currentScreen === "profesionales" ? "radar" : currentScreen === "chat" ? "chat" : ["tracking", "otp", "tech_navigation"].includes(currentScreen) ? "contracts" : "requests"}
             user={authUser}
             role={mobileRole}
-            initialRequest={currentScreen === "requests_feed" ? publishedRequestId : undefined}
+            initialRequest={currentScreen === "requests_feed" ? (mobileRole === "cliente" ? publishedRequestId : radarRequestId) : undefined}
+            onOpenRadarRequest={id => { setRadarRequestId(id); setCurrentScreen("requests_feed"); }}
             onSignIn={() => setIsAccountModalOpen(true)}
             onContractAccepted={() => { setPublicationMessage("Contratación confirmada. Ya puedes ver el contrato y su seguimiento."); setPublishedRequestId(""); setCurrentScreen("tracking"); }}
             onWorkAlert={announceWork}

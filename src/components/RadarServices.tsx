@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MapPin, Sparkles, Wrench } from "lucide-react";
+import { ClipboardList, MapPin, Sparkles, Wrench } from "lucide-react";
 
 export type RadarSpecialist = {
   id: string;
@@ -56,11 +56,12 @@ function placeMarkers(specialists: RadarSpecialist[], width: number, height: num
   return placed;
 }
 
-export function RadarGrid({ specialists, selected, onSelect, hasLocation }: {
+export function RadarGrid({ specialists, selected, onSelect, hasLocation, requestMode = false }: {
   specialists: RadarSpecialist[];
   selected: string | null;
   onSelect: (id: string) => void;
   hasLocation: boolean;
+  requestMode?: boolean;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -84,7 +85,7 @@ export function RadarGrid({ specialists, selected, onSelect, hasLocation }: {
   }, [specialists, selected, size]);
   const remaining = specialists.length - markers.length;
 
-  return <div ref={container} aria-label="Radar de especialistas" className="relative isolate h-64 overflow-hidden rounded-2xl border-2 border-slate-700 bg-slate-950 sm:h-72"
+  return <div ref={container} aria-label={requestMode ? "Radar de solicitudes" : "Radar de especialistas"} className="relative isolate h-64 overflow-hidden rounded-2xl border-2 border-slate-700 bg-slate-950 sm:h-72"
     style={{ backgroundImage: "linear-gradient(#33415555 1px,transparent 1px),linear-gradient(90deg,#33415555 1px,transparent 1px)", backgroundSize: "30px 30px" }}>
     {[22, 47, 72].map(size => <div key={size} aria-hidden="true"
       className="pointer-events-none absolute left-1/2 top-1/2 aspect-square -translate-x-1/2 -translate-y-1/2 rounded-full border border-emerald-400/15"
@@ -106,7 +107,7 @@ export function RadarGrid({ specialists, selected, onSelect, hasLocation }: {
     </div>
     {markers.map(({ specialist: item, x, y }) => {
       const active = item.id === selected;
-      const Icon = item.type === "profesional" ? Sparkles : Wrench;
+      const Icon = requestMode ? ClipboardList : item.type === "profesional" ? Sparkles : Wrench;
       return <button key={item.id} type="button" aria-label={`${item.trade} · ${item.name}`} aria-pressed={active}
         onClick={() => onSelect(item.id)}
         className={`absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-1 focus-visible:z-30 ${active ? "z-20" : "z-10"}`}

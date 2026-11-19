@@ -633,6 +633,33 @@ export async function runAllTests() {
         throw new Error("Privacidad vulnerada: radar expuso coordenadas GPS exactas del especialista");
       }
 
+      const clientHeaders = { Authorization: `Bearer ${clientToken}` };
+      async function createRadarRequest(targetRole: string, lat: number) {
+        const response = await apiCall("/services", {
+          method: "POST", headers: clientHeaders,
+          body: JSON.stringify({ title: "Solicitud del radar", description: "Prueba del radar por rol",
+            address: "Dirección privada", targetRole, lat, lng: -69.93421 }),
+        });
+        if (response.status !== 201) throw new Error("No se pudo preparar la solicitud del radar.");
+        return response.body.requestId;
+      }
+      const technician = await createRadarRequest("tecnico", 18.48431);
+      const professional = await createRadarRequest("profesional", 18.48431);
+      const distant = await createRadarRequest("tecnico", 19.78);
+      const cancelled = await createRadarRequest("tecnico", 18.48431);
+      await apiCall(`/services/${cancelled}`, { method: "DELETE", headers: clientHeaders });
+      for (const [role, expected, otherRole] of [["tecnico", technician, professional], ["profesional", professional, technician]]) {
+        const result = await apiCall(`/radar/requests?role=${role}&lat=18.48&lng=-69.94&radius=15`);
+        const item = result.body.find((entry: { id: string }) => entry.id === expected);
+        if (result.status !== 200 || !item || item.approxLat !== 18.48 || item.approxLng !== -69.93 ||
+            "address" in item || "lat" in item || "client_id" in item ||
+            result.body.some((entry: { id: string }) => [otherRole, distant, cancelled].includes(entry.id))) {
+          throw new Error("El radar de solicitudes mezcló roles, mostró solicitudes fuera de zona o expuso datos privados.");
+        }
+      }
+      await Promise.all([technician, professional, distant].map(id =>
+        apiCall(`/services/${id}`, { method: "DELETE", headers: clientHeaders })));
+
       const notifs = await apiCall("/notifications", { headers: { Authorization: `Bearer ${proToken}` } });
       if (notifs.status !== 200 || !Array.isArray(notifs.body) || notifs.body.length === 0) {
         throw new Error("Notificaciones no persistieron para el profesional");

@@ -102,3 +102,40 @@ radarRouter.get("/specialists", async (req: Request, res: Response) => {
     res.status(500).json({ error: "Error al escanear radar geoespacial" });
   }
 });
+
+// Open requests for the selected specialist role. Exact destinations remain on the contract.
+radarRouter.get("/requests", async (req: Request, res: Response) => {
+  const { role } = req.query;
+  const lat = Number(req.query.lat ?? 18.48);
+  const lng = Number(req.query.lng ?? -69.94);
+  const radius = Number(req.query.radius ?? 15);
+  if ((role !== "tecnico" && role !== "profesional") ||
+      !Number.isFinite(lat) || Math.abs(lat) > 90 || !Number.isFinite(lng) || Math.abs(lng) > 180 ||
+      !Number.isFinite(radius) || radius <= 0 || radius > 200) {
+    res.status(400).json({ error: "Rol, ubicación o radio de búsqueda inválidos." });
+    return;
+  }
+
+  const centerLat = Math.round(lat * 100) / 100;
+  const centerLng = Math.round(lng * 100) / 100;
+  const latRange = radius / 110 + 0.01;
+  try {
+    const { rows } = await db.query(
+      `SELECT r.id, r.title, r.status, r.min_budget,
+              c.name AS category,
+              ROUND(r.lat::numeric, 2)::double precision AS "approxLat",
+              ROUND(r.lng::numeric, 2)::double precision AS "approxLng"
+       FROM service_requests r LEFT JOIN service_categories c ON c.id = r.category_id
+       WHERE r.target_role = $1 AND r.status IN ('open', 'negotiating') AND r.location_confirmed
+         AND r.lat BETWEEN $2 AND $3
+       ORDER BY r.created_at DESC`,
+      [role, centerLat - latRange, centerLat + latRange],
+    );
+    res.json(rows.map(row => ({
+      ...row,
+      distanceKm: calculateDistanceKm(centerLat, centerLng, row.approxLat, row.approxLng),
+    })).filter(row => row.distanceKm <= radius).slice(0, 50));
+  } catch {
+    res.status(500).json({ error: "No se pudieron consultar las solicitudes del radar." });
+  }
+});
