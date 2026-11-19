@@ -1,5 +1,5 @@
 import type { WorkAlert } from "../services/publicationSound";
-import { FormEvent, lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { FormEvent, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { RadarPoint } from "./RadarMap";
 import { RadarGrid, RadarServiceCard, type RadarSort, type RadarSpecialist } from "./RadarServices";
 import { needsAccountDocuments, api } from "../services/api";
@@ -10,7 +10,7 @@ const RadarMap = lazy(() => import("./RadarMap").then(module => ({ default: modu
 
 type Role = "cliente" | "tecnico" | "profesional";
 type View = "requests" | "radar" | "contracts" | "chat";
-type RequestRow = { id: string; client_id?: string; target_role?: Role; title: string; description: string; status: string; address?: string; photos?: string[] };
+type RequestRow = { id: string; client_id?: string; target_role?: Role; title: string; description: string; status: string; category_name?: string; urgency?: string; min_budget?: number; address?: string; photos?: string[] };
 type RadarRequest = {
   id: string; title: string; status: string; category: string | null;
   approxLat: number; approxLng: number; min_budget: number; distanceKm: number;
@@ -64,6 +64,7 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
   const [offerResult, setOfferResult] = useState<{ id: string; rows: Offer[] } | null>(null);
   const [offerPanel, setOfferPanel] = useState(role === "cliente" && Boolean(initialRequest));
   const [selection, setSelection] = useState(initialRequest || "");
+  const detailRef = useRef<HTMLElement>(null);
   const offers = offerResult?.id === selection ? offerResult.rows : [];
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -110,6 +111,11 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
   const [disputes, setDisputes] = useState<{ id: string; reason: string; status: string }[]>([]);
   const isAdmin = user?.role === "admin";
   const canQuote = !isClient && user?.role === role;
+
+  useEffect(() => {
+    if (view !== "requests" || isClient || !initialRequest || !requestsLoaded || selection !== initialRequest) return;
+    detailRef.current?.scrollIntoView({ block: "start" });
+  }, [view, isClient, initialRequest, requestsLoaded, selection]);
 
   async function refresh() {
     if (isAdmin && view === "requests") {
@@ -218,15 +224,26 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
             }, "Disputa resuelta.")}>{decision === "refund_client" ? "Reembolsar al cliente" : "Liberar al especialista"}</button>)}
           </div>}
         </div>)}
-      </> : visibleRequests.length ? visibleRequests.map(row => <article key={row.id} className={card}>
+      </> : visibleRequests.length ? visibleRequests.map(row => <article key={row.id} ref={row.id === selection ? detailRef : undefined} className={`${card} scroll-mt-3`}>
         <h3 className="font-bold">{row.title}</h3>
         <p>{row.description}</p>
         <p className="text-slate-300">{statusLabel[row.status] || row.status}</p>
         {!offerPanel && <button className={button} onClick={() => {
           setOfferResult(null);
           setSelection(id => id === row.id ? "" : row.id);
-        }}>Ver ofertas</button>}
+        }} aria-expanded={selection === row.id}>
+          {isClient ? (selection === row.id ? "Ocultar ofertas" : "Ver ofertas")
+            : (selection === row.id ? "Ocultar detalles" : "Ver detalles de la solicitud")}
+        </button>}
         {selection === row.id && <>
+          {!isClient && <div className="space-y-1 rounded-lg border border-slate-600 bg-slate-950 p-3 text-sm">
+            <h4 className="font-bold text-white">Detalles del servicio</h4>
+            {row.category_name && <p>Especialidad · {row.category_name}</p>}
+            {row.urgency && <p>Urgencia · {{ urgente: "Urgente", express: "Exprés", programado: "Programado" }[row.urgency] ?? row.urgency}</p>}
+            {Number(row.min_budget) > 0 && <p>Presupuesto desde {pesos.format(row.min_budget!)}</p>}
+            {user && user.id === row.client_id && <p className="font-semibold text-amber-200">Tú publicaste esta solicitud. Solo otro especialista puede cotizarla.</p>}
+            {user && !canQuote && user.id !== row.client_id && <p className="text-amber-200">Para cotizar, entra con una cuenta acreditada del rol que solicita el cliente.</p>}
+          </div>}
           {isClient && user && (offerResult?.id !== row.id
             ? <p role="status" className="text-slate-300">Consultando ofertas…</p>
             : <p role="status" className="text-slate-300">{offers.length
@@ -321,7 +338,7 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
           <h4 className="font-bold text-white">{item.title}</h4>
           <p className="text-slate-300">{item.category || "Servicio"} · {statusLabel[item.status]} · {item.distanceKm} km aprox.</p>
           {Number(item.min_budget) > 0 && <p>Presupuesto desde {pesos.format(item.min_budget)}</p>}
-          <button type="button" className={button} onClick={() => onOpenRadarRequest?.(item.id)}>Ver solicitud</button>
+          <button type="button" className={button} onClick={() => onOpenRadarRequest?.(item.id)}>Ver detalles de la solicitud</button>
         </article>)}
       </div>}
     </>}
