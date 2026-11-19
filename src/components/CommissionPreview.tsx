@@ -1,3 +1,4 @@
+import { commissionBasisPoints, commissionInCents } from "../commission";
 import { useState } from "react";
 
 const currency = new Intl.NumberFormat("es-DO", { style: "currency", currency: "DOP" });
@@ -9,7 +10,7 @@ export function CommissionPreview() {
   // Calculate in centavos and round each invoice line independently.
   const match = /^(\d{1,9})(?:\.(\d{1,2}))?$/.exec(normalizedPrice);
   const total = match ? Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0")) : null;
-  const fee = total === null ? 0 : Math.round(total * 2542 / 10000);
+  const fee = total === null ? 0 : commissionInCents(total);
   const tax = showTax ? Math.round(fee * 18 / 100) : 0;
   const format = (centavos: number) => currency.format(centavos / 100);
 
@@ -27,7 +28,7 @@ export function CommissionPreview() {
     </label>
     {total === null ? <p role="status" className="text-sm text-amber-200">Escribe un importe con hasta dos decimales.</p> :
       <dl className="grid grid-cols-[1fr_auto] gap-2 text-sm" aria-live="polite">
-        <dt>Comisión DICLIK (25.42 %)</dt><dd>{format(fee)}</dd>
+        <dt>Comisión DICLIK ({commissionBasisPoints / 100} %)</dt><dd>{format(fee)}</dd>
         {showTax && <><dt>ITBIS sobre la comisión</dt><dd>{format(tax)}</dd></>}
         <dt>Descuento total al especialista</dt><dd>{format(fee + tax)}</dd>
         <dt className="font-bold">Neto del especialista</dt><dd className="font-bold text-emerald-300">{format(total - fee - tax)}</dd>

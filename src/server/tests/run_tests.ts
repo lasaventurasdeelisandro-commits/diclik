@@ -513,17 +513,17 @@ export async function runAllTests() {
         throw new Error("El historial de ubicación quedó accesible tras cerrar el contrato");
       }
 
-      // Verify pro ledger received 70% = RD$ 1,750
+      // Verify the payout after the 25.42% platform fee.
       const proLedger = await apiCall("/wallet/ledger", { headers: { Authorization: `Bearer ${proToken}` } });
-      if (Number(proLedger.body.balance_available) !== 1750) {
+      if (Number(proLedger.body.balance_available) !== 1864.50) {
         throw new Error(`Desembolso incorrecto al técnico: ${proLedger.body.balance_available}`);
       }
 
       const fee = await db.query(
         "SELECT amount FROM financial_transactions WHERE contract_id = $1 AND type = 'fee_deduction';", [contractId]
       );
-      if (fee.rows.length !== 1 || Number(fee.rows[0].amount) !== 750) {
-        throw new Error("La comisión del 30% no se registró correctamente.");
+      if (fee.rows.length !== 1 || Number(fee.rows[0].amount) !== 635.50) {
+        throw new Error("La comisión del 25.42% no se registró correctamente.");
       }
 
       // Leave review
@@ -762,7 +762,7 @@ export async function runAllTests() {
 
     // 9. Bank Withdrawals with Idempotency & Charge Refunded Webhook
     await runTest("9. Retiros Bancarios Auditados (Idempotencia / Saldo) y Reembolso Webhook HMAC", async () => {
-      // Pro has RD$ 1,750 available from test 5 -> request valid withdrawal of RD$ 1,000
+      // Pro has RD$ 1,864.50 available from test 5 -> request valid withdrawal of RD$ 1,000
       const wdKey = `idem_wd_test_${ts}`;
       const wdOk = await apiCall("/wallet/withdraw", {
         method: "POST",

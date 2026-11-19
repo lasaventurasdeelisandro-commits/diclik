@@ -1,0 +1,1 @@
+ALTER TABLE contracts ALTER COLUMN commission_rate SET DEFAULT 0.2542;

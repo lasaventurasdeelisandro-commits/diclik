@@ -340,6 +340,10 @@ Responde de manera experta en español con recomendaciones prácticas y estructu
 app.use("/api", (err: any, _req: Request, res: Response, _next: NextFunction) => {
   console.error("[API Unhandled Error]:", err?.message || err);
   if (!res.headersSent) {
+    if (err?.type === "entity.too.large") {
+      res.status(413).json({ error: "Los archivos superan el tamaño permitido. Reduce su tamaño e inténtalo de nuevo." });
+      return;
+    }
     res.status(err?.status || 500).json({ error: "Error interno del servidor Diclik.com" });
   }
 });

@@ -1,3 +1,4 @@
+import { prepareImage, readDataUrl } from "../services/prepareImage";
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { ServiceLocation, type ServicePoint } from "./ServiceLocation";
 import { DiclikOperations } from "./DiclikOperations";
@@ -1560,6 +1561,10 @@ export function DirectoMobileApp({
   const [isPresetPhotosModalOpen, setIsPresetPhotosModalOpen] = useState<boolean>(false);
   const [expandedPhotoUrl, setExpandedPhotoUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const photoUploadPending = useRef(false);
+  const [preparingPhotos, setPreparingPhotos] = useState(false);
+  const [photoMessage, setPhotoMessage] = useState("");
 
   // Technician / Professional proposal submission modal
   const [proposingJob, setProposingJob] = useState<CustomerServiceRequest | null>(null);
@@ -1608,23 +1613,39 @@ export function DirectoMobileApp({
   ];
 
   // Photo handlers for Client
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    const file = files[0];
-    e.target.value = "";
-    if (!isDemo && (!/^image\/(jpeg|png|webp|gif)$/.test(file.type) || file.size > 170_000 || clientJobPhotos.length >= 8)) {
-      setPublicationMessage("Adjunta hasta 8 imágenes JPG, PNG, WebP o GIF de hasta 170 KB cada una.");
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from<File>(event.currentTarget.files ?? []);
+    event.currentTarget.value = "";
+    if (!files.length || photoUploadPending.current) return;
+    const slots = 8 - clientJobPhotos.length;
+    if (slots < 1) {
+      setPhotoMessage("Solo puedes adjuntar ocho fotos por solicitud.");
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        setClientJobPhotos((prev) => [...prev, reader.result as string]);
-        onSpeak("Foto del trabajo adjuntada con éxito.");
+
+    photoUploadPending.current = true;
+    setPreparingPhotos(true);
+    setPhotoMessage("Preparando fotos…");
+    const photos: string[] = [];
+    const errors: string[] = [];
+    try {
+      for (const file of files.slice(0, slots)) {
+        try {
+          photos.push(await readDataUrl(await prepareImage(file, 1400, 170_000)));
+        } catch (error) {
+          errors.push(error instanceof Error ? error.message : "No se pudo preparar una de las fotos.");
+        }
       }
-    };
-    reader.readAsDataURL(file);
+      if (photos.length) setClientJobPhotos(previous => [...previous, ...photos].slice(0, 8));
+      if (files.length > slots) errors.push("Solo puedes adjuntar ocho fotos por solicitud.");
+      setPhotoMessage([
+        photos.length ? (photos.length === 1 ? "Foto adjuntada." : `${photos.length} fotos adjuntadas.`) : "",
+        ...new Set(errors),
+      ].filter(Boolean).join(" "));
+    } finally {
+      photoUploadPending.current = false;
+      setPreparingPhotos(false);
+    }
   };
 
   const handleSimulatedCameraCapture = () => {
@@ -1726,6 +1747,10 @@ export function DirectoMobileApp({
         return;
       }
       if (publicationPending.current) return;
+      if (photoUploadPending.current) {
+        setPublicationMessage("Espera a que terminen de prepararse las fotos.");
+        return;
+      }
       if (!clientAddressInput.trim() || !servicePoint || !servicePointConfirmed) {
         setPublicationMessage("Escribe la dirección y confirma el punto del servicio en el mapa.");
         return;
@@ -2379,9 +2404,10 @@ export function DirectoMobileApp({
                 </div>
 
                 {/* Photo Action Buttons */}
-                <div className="grid grid-cols-3 gap-1.5">
+                <div className={isDemo ? "grid grid-cols-3 gap-1.5" : "grid grid-cols-2 gap-1.5"}>
                   <button
-                    onClick={() => isDemo ? setIsCameraActive(true) : fileInputRef.current?.click()}
+                    onClick={() => isDemo ? setIsCameraActive(true) : cameraInputRef.current?.click()}
+                    disabled={preparingPhotos}
                     className="p-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[10px] font-bold flex flex-col items-center justify-center space-y-1 transition-all cursor-pointer active:scale-95 shadow-sm"
                   >
                     <Camera className="w-4 h-4 text-amber-300" />
@@ -2390,29 +2416,36 @@ export function DirectoMobileApp({
 
                   <button
                     onClick={() => fileInputRef.current?.click()}
+                    disabled={preparingPhotos}
                     className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-[10px] font-bold flex flex-col items-center justify-center space-y-1 transition-all cursor-pointer active:scale-95 border border-slate-700"
                   >
                     <Upload className="w-4 h-4 text-emerald-400" />
                     <span>Subir Imagen</span>
                   </button>
 
-                  <button
-                    onClick={() => isDemo ? setIsPresetPhotosModalOpen(true) : fileInputRef.current?.click()}
+                  {isDemo && <button
+                    onClick={() => setIsPresetPhotosModalOpen(true)}
                     className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-[10px] font-bold flex flex-col items-center justify-center space-y-1 transition-all cursor-pointer active:scale-95 border border-slate-700"
                   >
                     <ImageIcon className="w-4 h-4 text-sky-400" />
                     <span>Ejemplos</span>
-                  </button>
+                  </button>}
 
                   {/* Hidden native file input */}
                   <input
                     type="file"
                     ref={fileInputRef}
+                    aria-label="Seleccionar fotos del trabajo"
+                    multiple
                     accept="image/*"
                     onChange={handleFileUpload}
                     className="hidden"
                   />
                 </div>
+
+                {!isDemo && <input type="file" ref={cameraInputRef} aria-label="Cámara del trabajo"
+                  accept="image/*" capture="environment" onChange={handleFileUpload} className="hidden" />}
+                {photoMessage && <p role="status" className="text-xs text-slate-200">{photoMessage}</p>}
 
                 {/* Attached Photos Carousel / Grid */}
                 {clientJobPhotos.length > 0 && (

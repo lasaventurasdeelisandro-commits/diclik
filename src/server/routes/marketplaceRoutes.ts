@@ -1,3 +1,4 @@
+import { commissionBasisPoints, commissionInCents } from "../../commission.ts";
 import { Router, Request, Response } from "express";
 import crypto from "crypto";
 import { db } from "../db/index.ts";
@@ -42,6 +43,19 @@ async function requireIdentity(req: AuthenticatedRequest, res: Response, next: i
   } catch (error) {
     next(error);
   }
+}
+
+function validServicePhoto(value: unknown): boolean {
+  if (typeof value !== "string" || value.length > 226_700) return false;
+  const match = /^data:image\/(jpeg|png|webp|gif);base64,([A-Za-z0-9+/]+={0,2})$/.exec(value);
+  if (!match) return false;
+  const [, format, data] = match;
+  const bytes = Buffer.from(data, "base64");
+  if (bytes.length > 170_000 || bytes.toString("base64") !== data) return false;
+  if (format === "jpeg") return bytes.subarray(0, 3).equals(Buffer.from([255, 216, 255]));
+  if (format === "png") return bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  if (format === "gif") return ["GIF87a", "GIF89a"].includes(bytes.subarray(0, 6).toString("ascii"));
+  return bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP";
 }
 
 // GET /api/v1/categories (Active official categories)
@@ -122,6 +136,11 @@ marketplaceRouter.post("/services", requireAuth, requireIdentity, async (req: Au
     const user = req.user!;
     const { title, description, categoryId, targetRole, address, lat, lng, urgency, budgetStrategy, minBudget, photos } = req.body;
 
+    if (photos != null && (!Array.isArray(photos) || photos.length > 8 || !photos.every(validServicePhoto))) {
+      res.status(400).json({ error: "Adjunta hasta ocho fotos válidas. Si alguna no se puede preparar, vuelve a seleccionarla." });
+      return;
+    }
+
     if ((lat != null || lng != null) &&
         (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180)) {
       res.status(400).json({ error: "Selecciona un punto válido en el mapa." });
@@ -165,7 +184,7 @@ marketplaceRouter.post("/services", requireAuth, requireIdentity, async (req: Au
           validUrgency,
           validStrategy,
           parsedBudget,
-          Array.isArray(photos) ? photos.slice(0, 8) : [],
+          photos ?? [],
           releaseCode,
           lat != null && lng != null
         ]
@@ -581,7 +600,7 @@ marketplaceRouter.post("/offers/:id/accept", requireAuth, requireIdentity, async
 
     const contractId = "ctr_" + crypto.randomUUID().slice(0, 12);
     const agreedPrice = Number(offer.status === "countered" && offer.counter_price ? offer.counter_price : offer.price);
-    const platformFee = Math.round(agreedPrice * 0.30 * 100) / 100;
+    const platformFee = commissionInCents(Math.round(agreedPrice * 100)) / 100;
     const proPayout = Math.round((agreedPrice - platformFee) * 100) / 100;
     const otpCode = offer.release_code || crypto.randomInt(1000, 10000).toString();
     const payerId = offer.client_id;
@@ -625,8 +644,8 @@ marketplaceRouter.post("/offers/:id/accept", requireAuth, requireIdentity, async
           `INSERT INTO contracts (
             id, request_id, client_id, professional_id, offer_id, agreed_price,
             commission_rate, platform_fee, professional_payout, status, otp_code
-          ) VALUES ($1, $2, $3, $4, $5, $6, 0.30, $7, $8, 'held_in_escrow', $9);`,
-          [contractId, offer.request_id, payerId, offer.professional_id, id, agreedPrice, platformFee, proPayout, otpCode]
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'held_in_escrow', $10);`,
+          [contractId, offer.request_id, payerId, offer.professional_id, id, agreedPrice, commissionBasisPoints / 10_000, platformFee, proPayout, otpCode]
         );
 
         await tx.query(

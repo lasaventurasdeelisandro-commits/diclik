@@ -1,3 +1,4 @@
+import { prepareImage, readDataUrl } from "../services/prepareImage";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, type Accreditation, type ReviewAccreditation, type IdentitySubmission } from "../services/api";
 
@@ -7,36 +8,17 @@ const kinds: Record<Accreditation["kind"], string> = {
 const statuses = { pending: "En revisión", approved: "Aprobada", rejected: "Rechazada" };
 const button = "rounded-lg border border-amber-400/50 px-3 py-2 text-sm text-amber-200 disabled:opacity-50";
 
-function encodeFile(file: Blob): Promise<{ mime: string; data: string }> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve({ mime: file.type, data: String(reader.result).split(",")[1] });
-    reader.onerror = () => reject(new Error("No se pudo leer el archivo."));
-    reader.readAsDataURL(file);
-  });
+async function encodeFile(file: Blob) {
+  const url = await readDataUrl(file);
+  return { mime: file.type, data: url.slice(url.indexOf(",") + 1) };
 }
 
-async function preparePhoto(file: File, maxDimension = 480, maxBytes = 180 * 1024) {
-  if (!["image/jpeg", "image/png"].includes(file.type) || file.size > 12 * 1024 * 1024) {
-    throw new Error("Selecciona una foto JPG o PNG de hasta 12 MB.");
+async function prepareEvidence(file: File, limit: number) {
+  if (file.type === "application/pdf") {
+    if (file.size > limit) throw new Error(`El PDF supera el límite de ${limit / 1024} KB. Reduce su tamaño o adjunta una foto.`);
+    return encodeFile(file);
   }
-  const image = await createImageBitmap(file);
-  try {
-    const canvas = document.createElement("canvas");
-    const scale = Math.min(1, maxDimension / Math.max(image.width, image.height));
-    canvas.width = Math.max(1, Math.round(image.width * scale));
-    canvas.height = Math.max(1, Math.round(image.height * scale));
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error("No se pudo preparar la foto.");
-    context.fillStyle = "#fff";
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    const photo = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, "image/jpeg", 0.78));
-    if (!photo || photo.size > maxBytes) throw new Error("Selecciona una foto más pequeña.");
-    return encodeFile(photo);
-  } finally {
-    image.close();
-  }
+  return encodeFile(await prepareImage(file, 1800, limit));
 }
 
 export function AccountIdentity() {
@@ -59,7 +41,7 @@ export function AccountIdentity() {
     if (!(file instanceof File) || !file.size) return;
     setBusy(true);
     try {
-      await api.accreditation.submitIdentity(await preparePhoto(file, 1600, 1024 * 1024));
+      await api.accreditation.submitIdentity(await encodeFile(await prepareImage(file, 1600, 1024 * 1024)));
       setSubmitted(true);
       setMessage("Identificación recibida.");
       form.reset();
@@ -76,9 +58,9 @@ export function AccountIdentity() {
     <p>Solo Administración puede consultar el documento.</p>
     <form onSubmit={submit} className="space-y-2">
       <label className="block">Foto de cédula o identificación
-        <input name="identity" type="file" accept="image/jpeg,image/png" required className="mt-1 block w-full" />
+        <input name="identity" type="file" accept="image/*" required className="mt-1 block w-full" />
       </label>
-      <button className={button} disabled={busy}>{submitted ? "Actualizar identificación" : "Enviar identificación"}</button>
+      <button className={button} disabled={busy}>{busy ? "Enviando identificación…" : submitted ? "Actualizar identificación" : "Enviar identificación"}</button>
     </form>
     {message && <p role="status">{message}</p>}
   </section>;
@@ -110,15 +92,12 @@ export function SpecialistAccreditation({ role }: { role: "tecnico" | "profesion
       return;
     }
     const limit = isReferences ? 400 * 1024 : 1024 * 1024;
-    if (evidence.some(file => !["application/pdf", "image/jpeg", "image/png"].includes(file.type) || file.size > limit)) {
-      setMessage(`Los archivos deben ser PDF, JPG o PNG de hasta ${isReferences ? "400 KB por carta" : "1 MB"}.`);
-      return;
-    }
     setBusy(true);
     setMessage("");
     try {
-      const files = await Promise.all(evidence.map(encodeFile));
-      const preparedPhoto = await preparePhoto(photo);
+      const preparedPhoto = await encodeFile(await prepareImage(photo, 480, 180 * 1024));
+      const files = [];
+      for (const file of evidence) files.push(await prepareEvidence(file, limit));
       setRecord(await api.accreditation.submit({
         kind, photo: preparedPhoto,
         ...(isReferences ? { references: files, referencesConsent: inputs.get("referencesConsent") === "on" } : { document: files[0] }),
@@ -140,7 +119,7 @@ export function SpecialistAccreditation({ role }: { role: "tecnico" | "profesion
     {record?.status === "approved" && <p>Si envías nuevos archivos, tu acreditación volverá a revisión.</p>}
     <form onSubmit={submit} className="space-y-3">
       <label className="block">Foto de perfil
-        <input name="photo" type="file" accept="image/jpeg,image/png" required className="block w-full mt-1" />
+        <input name="photo" type="file" accept="image/*" required className="block w-full mt-1" />
       </label>
       <label className="block">Tipo de documento
         <select name="kind" value={kind} onChange={event => setKind(event.target.value as Accreditation["kind"])} className="block mt-1 w-full rounded-lg bg-slate-900 p-2">
@@ -151,15 +130,15 @@ export function SpecialistAccreditation({ role }: { role: "tecnico" | "profesion
       </label>
       {kind === "referencias" ? <>
         <p>Adjunta una carta por cliente. Incluye el nombre, un teléfono o correo autorizado, el trabajo realizado y la fecha.</p>
-        {[1, 2, 3].map(number => <label key={number} className="block">Carta {number} (PDF, JPG o PNG, hasta 400 KB)
-          <input name="document" type="file" accept="application/pdf,image/jpeg,image/png" required className="block w-full mt-1" />
+        {[1, 2, 3].map(number => <label key={number} className="block">Carta {number} (PDF hasta 400 KB o foto)
+          <input name="document" type="file" accept="application/pdf,image/*" required className="block w-full mt-1" />
         </label>)}
         <label className="flex gap-2">
           <input type="checkbox" name="referencesConsent" required />
           Confirmo que las cartas son de tres clientes distintos y que autorizaron el uso de su contacto para verificar la referencia.
         </label>
-      </> : <label className="block">Documento (PDF, JPG o PNG, hasta 1 MB)
-        <input name="document" type="file" accept="application/pdf,image/jpeg,image/png" required className="block w-full mt-1" />
+      </> : <label className="block">Documento (PDF hasta 1 MB o foto)
+        <input name="document" type="file" accept="application/pdf,image/*" required className="block w-full mt-1" />
       </label>}
       <button type="submit" className={button} disabled={busy}>{busy ? "Enviando…" : record ? "Enviar nuevos archivos" : "Enviar a revisión"}</button>
     </form>
