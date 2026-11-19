@@ -1,0 +1,133 @@
+import { Router, Response, RequestHandler } from "express";
+import { randomUUID } from "node:crypto";
+import { db } from "../db/index.ts";
+import { AuthenticatedRequest, requireAuth, requireRole } from "../middleware/auth.ts";
+
+export const accreditationRouter = Router();
+const specialistOnly = [requireAuth, requireRole("tecnico", "profesional")];
+const reviewerOnly = [requireAuth, requireRole("admin")];
+const metadata = "revision, kind, status, reason, submitted_at, reviewed_at";
+
+function safe(handler: (req: AuthenticatedRequest, res: Response) => Promise<void>): RequestHandler {
+  return (req, res, next) => { void handler(req, res).catch(next); };
+}
+
+function validFile(file: { mime?: string; data?: string } | undefined, limit: number, photo = false) {
+  if (typeof file?.data !== "string" || file.data.length > Math.ceil(limit / 3) * 4) return false;
+  const bytes = Buffer.from(file.data, "base64");
+  if (bytes.length > limit || bytes.toString("base64") !== file.data) return false;
+  if (file.mime === "image/jpeg") return bytes.subarray(0, 3).equals(Buffer.from([255, 216, 255]));
+  if (file.mime === "image/png") return bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  return !photo && file.mime === "application/pdf" && bytes.subarray(0, 5).toString() === "%PDF-";
+}
+
+accreditationRouter.use((_req, res, next) => {
+  res.setHeader("Cache-Control", "private, no-store");
+  next();
+});
+
+accreditationRouter.get("/mine", ...specialistOnly, safe(async (req, res) => {
+  const result = await db.query(`SELECT ${metadata} FROM specialist_accreditations WHERE user_id = $1`, [req.user!.id]);
+  res.json(result.rows[0] ?? null);
+}));
+
+accreditationRouter.put("/mine", ...specialistOnly, safe(async (req, res) => {
+  const { kind, photo, document } = req.body;
+  if (!["titulo", "diploma", "carta"].includes(kind) ||
+      !validFile(photo, 180 * 1024, true) || !validFile(document, 1024 * 1024)) {
+    res.status(400).json({ error: "Adjunta una foto JPG o PNG de hasta 180 KB y un documento PDF, JPG o PNG de hasta 1 MB." });
+    return;
+  }
+  const result = await db.transaction(async tx => {
+    const userId = req.user!.id;
+    await tx.query("SELECT user_id FROM professional_profiles WHERE user_id = $1 FOR UPDATE", [userId]);
+    const row = await tx.query(
+      `INSERT INTO specialist_accreditations
+         (user_id, revision, kind, photo_mime, photo_data, document_mime, document_data)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (user_id) DO UPDATE SET revision = EXCLUDED.revision, kind = EXCLUDED.kind,
+       photo_mime = EXCLUDED.photo_mime, photo_data = EXCLUDED.photo_data,
+       document_mime = EXCLUDED.document_mime, document_data = EXCLUDED.document_data,
+       status = 'pending', reason = NULL, submitted_at = NOW(), reviewed_at = NULL
+       RETURNING ${metadata}`,
+      [userId, randomUUID(), kind, photo.mime, photo.data, document.mime, document.data]
+    );
+    await tx.query("UPDATE professional_profiles SET verified = FALSE WHERE user_id = $1", [userId]);
+    return row.rows[0];
+  });
+  res.status(201).json(result);
+}));
+
+accreditationRouter.get("/review", ...reviewerOnly, safe(async (_req, res) => {
+  const result = await db.query(
+    `SELECT a.user_id, a.revision, a.kind, a.status, a.reason, a.submitted_at, a.reviewed_at,
+            u.full_name, u.role
+       FROM specialist_accreditations a JOIN users u ON u.id = a.user_id
+       ORDER BY (a.status = 'pending') DESC, a.submitted_at DESC LIMIT 100`
+  );
+  res.json(result.rows);
+}));
+
+accreditationRouter.get("/files/:userId/:revision/:part", requireAuth, safe(async (req, res) => {
+  const { userId, revision, part } = req.params;
+  if (req.user!.role !== "admin" && req.user!.id !== userId) {
+    res.sendStatus(403);
+    return;
+  }
+  if (part !== "photo" && part !== "document") {
+    res.sendStatus(404);
+    return;
+  }
+  const result = await db.query(
+    `SELECT ${part}_mime AS mime, ${part}_data AS data FROM specialist_accreditations
+      WHERE user_id = $1 AND revision::text = $2`, [userId, revision]
+  );
+  const file = result.rows[0];
+  if (!file) {
+    res.sendStatus(404);
+    return;
+  }
+  const extension = file.mime === "application/pdf" ? "pdf" : file.mime === "image/png" ? "png" : "jpg";
+  res.setHeader("Content-Disposition", `attachment; filename="${part}.${extension}"`);
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.type(file.mime).send(Buffer.from(file.data, "base64"));
+}));
+
+accreditationRouter.patch("/review/:userId", ...reviewerOnly, safe(async (req, res) => {
+  const { userId } = req.params;
+  const { revision, decision, reason } = req.body;
+  const notes = typeof reason === "string" ? reason.trim() : "";
+  if (typeof revision !== "string" || !["approved", "rejected"].includes(decision) ||
+      (decision === "rejected" && (!notes || notes.length > 500))) {
+    res.status(400).json({ error: "Indica una decisión válida y el motivo si rechazas la acreditación." });
+    return;
+  }
+  const reviewed = await db.transaction(async tx => {
+    await tx.query("SELECT user_id FROM professional_profiles WHERE user_id = $1 FOR UPDATE", [userId]);
+    const result = await tx.query(
+      `UPDATE specialist_accreditations SET status = $3, reason = $4, reviewed_at = NOW()
+       WHERE user_id = $1 AND revision::text = $2 AND status = 'pending'
+       RETURNING photo_mime, photo_data`,
+      [userId, revision, decision, decision === "rejected" ? notes : null]
+    );
+    if (!result.rows.length) return false;
+    const approved = decision === "approved";
+    await tx.query("UPDATE professional_profiles SET verified = $2 WHERE user_id = $1", [userId, approved]);
+    if (approved) {
+      const photo = result.rows[0];
+      await tx.query("UPDATE users SET avatar_url = $2, updated_at = NOW() WHERE id = $1",
+        [userId, `data:${photo.photo_mime};base64,${photo.photo_data}`]);
+    }
+    await tx.query(
+      `INSERT INTO audit_logs (id, actor_id, event_type, target_table, target_id, details)
+       VALUES ($1, $2, 'PRO_VERIFICATION_STATUS_CHANGED', 'professional_profiles', $3, $4)`,
+      [`aud_${randomUUID()}`, req.user!.id, userId, JSON.stringify({ revision, decision })]
+    );
+    return true;
+  });
+  if (!reviewed) {
+    res.status(409).json({ error: "La solicitud cambió o ya fue revisada. Actualiza la lista." });
+    return;
+  }
+  res.json({ status: decision });
+}));

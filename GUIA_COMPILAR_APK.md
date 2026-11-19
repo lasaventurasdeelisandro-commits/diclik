@@ -18,6 +18,7 @@ Define la URL HTTPS definitiva de tu servidor API antes de generar el bundle web
 
 ```bash
 export VITE_API_BASE_URL="https://diclik.vercel.app"
+export VITE_DICLIK_ANDROID=true
 # El backend admite el origen HTTPS local de Capacitor para /api/v1/.
 export NODE_ENV=production
 npm run build

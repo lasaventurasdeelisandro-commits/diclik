@@ -6,9 +6,26 @@
 const configuredBase = (import.meta as ImportMeta & { env?: { VITE_API_BASE_URL?: string } }).env?.VITE_API_BASE_URL?.trim().replace(/\/+$/, "") || "";
 const API_BASE = configuredBase.endsWith("/api/v1") ? configuredBase : `${configuredBase}/api/v1`;
 
+export type Accreditation = {
+  revision: string;
+  kind: "titulo" | "diploma" | "carta";
+  status: "pending" | "approved" | "rejected";
+  reason: string | null;
+};
+export type ReviewAccreditation = Accreditation & { user_id: string; full_name: string; role: string };
+type UploadFile = { mime: string; data: string };
+
+export function isAdminPage() {
+  return typeof window !== "undefined" && /^\/administracion\/?$/.test(window.location.pathname);
+}
+
+function authStorage() {
+  return isAdminPage() ? sessionStorage : localStorage;
+}
+
 function getAuthHeader(): Record<string, string> {
   if (typeof window === "undefined") return {};
-  const token = localStorage.getItem("directo_token");
+  const token = authStorage().getItem("directo_token");
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
@@ -38,7 +55,7 @@ export const api = {
       });
       const json = await handleResponse(res, "Error al registrar usuario");
       if (json.token && typeof window !== "undefined") {
-        localStorage.setItem("directo_token", json.token);
+        authStorage().setItem("directo_token", json.token);
       }
       return json;
     },
@@ -50,8 +67,11 @@ export const api = {
         body: JSON.stringify({ email, password })
       });
       const json = await handleResponse(res, "Error al iniciar sesión");
+      if (isAdminPage() !== (json.user?.role === "admin")) {
+        throw new Error(isAdminPage() ? "Esta página es para cuentas de administración." : "Usa la página web de Administración con esta cuenta.");
+      }
       if (json.token && typeof window !== "undefined") {
-        localStorage.setItem("directo_token", json.token);
+        authStorage().setItem("directo_token", json.token);
       }
       return json;
     },
@@ -109,7 +129,7 @@ export const api = {
         // Ignore network errors when clearing client session
       } finally {
         if (typeof window !== "undefined") {
-          localStorage.removeItem("directo_token");
+          authStorage().removeItem("directo_token");
         }
       }
     }
@@ -398,6 +418,45 @@ export const api = {
     }
   },
 
+  accreditation: {
+    async mine(signal?: AbortSignal): Promise<Accreditation | null> {
+      const res = await fetch(`${API_BASE}/accreditation/mine`, { headers: getAuthHeader(), signal });
+      return handleResponse(res, "No se pudo consultar la acreditación");
+    },
+    async submit(data: { kind: Accreditation["kind"]; photo: UploadFile; document: UploadFile }): Promise<Accreditation> {
+      const res = await fetch(`${API_BASE}/accreditation/mine`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...getAuthHeader() },
+        body: JSON.stringify(data),
+      });
+      return handleResponse(res, "No se pudo enviar la acreditación");
+    },
+    async list(): Promise<ReviewAccreditation[]> {
+      const res = await fetch(`${API_BASE}/accreditation/review`, { headers: getAuthHeader() });
+      return handleResponse(res, "No se pudieron cargar las acreditaciones");
+    },
+    async download(userId: string, revision: string, part: "photo" | "document") {
+      const res = await fetch(`${API_BASE}/accreditation/files/${encodeURIComponent(userId)}/${encodeURIComponent(revision)}/${part}`, { headers: getAuthHeader() });
+      if (!res.ok) throw new Error("No se pudo descargar el archivo.");
+      const blob = await res.blob();
+      const extension = blob.type === "application/pdf" ? "pdf" : blob.type === "image/png" ? "png" : "jpg";
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${part === "photo" ? "foto" : "documento"}.${extension}`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    },
+    async review(userId: string, revision: string, decision: "approved" | "rejected", reason: string) {
+      const res = await fetch(`${API_BASE}/accreditation/review/${encodeURIComponent(userId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...getAuthHeader() },
+        body: JSON.stringify({ revision, decision, reason }),
+      });
+      return handleResponse(res, "No se pudo guardar la revisión");
+    },
+  },
+
   admin: {
     async getMetrics() {
       const res = await fetch(`${API_BASE}/admin/metrics`, {
@@ -415,15 +474,6 @@ export const api = {
         headers: { ...getAuthHeader() }
       });
       return handleResponse(res, "Error al cargar usuarios");
-    },
-
-    async verifyProfessional(userId: string, verified: boolean) {
-      const res = await fetch(`${API_BASE}/admin/professionals/${userId}/verify`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", ...getAuthHeader() },
-        body: JSON.stringify({ verified })
-      });
-      return handleResponse(res, "Error al actualizar acreditación");
     },
 
     async getDisputes() {

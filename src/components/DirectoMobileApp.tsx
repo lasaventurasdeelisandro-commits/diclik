@@ -1381,6 +1381,10 @@ export function DirectoMobileApp({
     api.auth.getMe()
       .then((me) => {
         const u = me?.user || me;
+        if (u?.role === "admin") {
+          void api.auth.logout();
+          return;
+        }
         if (u && u.id) {
           setAuthUser({
             id: u.id,

@@ -1,3 +1,4 @@
+import { SpecialistAccreditation } from "./Accreditation";
 import React, { useEffect, useState } from "react";
 import {
   X,
@@ -715,6 +716,9 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
                   </button>
                 </form>
               )}
+
+              {panelTab === "perfil" && (currentUser.role === "tecnico" || currentUser.role === "profesional") &&
+                <SpecialistAccreditation key={currentUser.id} />}
 
               {panelTab === "billetera" && (
                 <div className="space-y-2.5">

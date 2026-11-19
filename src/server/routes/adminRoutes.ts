@@ -68,32 +68,9 @@ adminRouter.get("/users", async (req: AuthenticatedRequest, res: Response) => {
   }
 });
 
-// PATCH /api/v1/admin/professionals/:id/verify
-adminRouter.patch("/professionals/:id/verify", async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const { id } = req.params;
-    const { verified } = req.body;
-
-    const updated = await db.query(
-      "UPDATE professional_profiles SET verified = $1 WHERE user_id = $2;",
-      [Boolean(verified), id]
-    );
-
-    if ((updated.rowCount ?? 0) === 0) {
-      res.status(404).json({ error: "Perfil profesional no encontrado" });
-      return;
-    }
-
-    await db.query(
-      `INSERT INTO audit_logs (id, actor_id, event_type, target_table, target_id, details)
-       VALUES ($1, $2, 'PRO_VERIFICATION_STATUS_CHANGED', 'professional_profiles', $3, $4);`,
-      ["aud_" + crypto.randomUUID().slice(0, 12), req.user!.id, id, JSON.stringify({ verified: Boolean(verified) })]
-    );
-
-    res.json({ message: "Estado de acreditación actualizado correctamente" });
-  } catch {
-    res.status(500).json({ error: "Error al actualizar acreditación del profesional" });
-  }
+// Retire the legacy shortcut that bypassed document review.
+adminRouter.patch("/professionals/:id/verify", (_req, res) => {
+  res.status(409).json({ error: "Usa el panel de acreditaciones para revisar los archivos." });
 });
 
 // PATCH /api/v1/admin/users/:id/status (Activate, suspend or ban a user account)

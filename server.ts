@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
 import { jsonBody } from "./src/server/middleware/jsonBody.ts";
 import { db } from "./src/server/db/index.ts";
+import { accreditationRouter } from "./src/server/routes/accreditationRoutes.ts";
 import { authRouter } from "./src/server/routes/authRoutes.ts";
 import { marketplaceRouter } from "./src/server/routes/marketplaceRoutes.ts";
 import { radarRouter } from "./src/server/routes/radarRoutes.ts";
@@ -121,6 +122,7 @@ app.use("/api/v1/radar", radarRouter);
 app.use("/api/v1/chat", chatRouter);
 app.use("/api/v1/wallet", walletRouter);
 app.use("/api/v1/admin", adminRouter);
+app.use("/api/v1/accreditation", accreditationRouter);
 app.use("/api/v1", marketplaceRouter);
 
 // Initialize Gemini SDK cleanly

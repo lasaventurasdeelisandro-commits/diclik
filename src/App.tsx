@@ -1,6 +1,9 @@
-import React, { useState } from "react";
+import React, { useState, lazy, Suspense } from "react";
 import { Capacitor, registerPlugin } from "@capacitor/core";
+import { isAdminPage } from "./services/api";
 import { DirectoMobileApp } from "./components/DirectoMobileApp";
+
+const AdminPage = (import.meta as ImportMeta & { env?: { VITE_DICLIK_ANDROID?: string } }).env?.VITE_DICLIK_ANDROID === "true" ? null : lazy(() => import("./components/AdminPage"));
 
 const voice = registerPlugin<{ speak(options: { text: string }): Promise<void> }>("DiclikVoice");
 
@@ -34,6 +37,9 @@ export default function App() {
     utterance.lang = "es-DO";
     window.speechSynthesis.speak(utterance);
   };
+  if (AdminPage && isAdminPage() && !Capacitor.isNativePlatform()) {
+    return <Suspense fallback={<p role="status">Cargando Administración…</p>}><AdminPage /></Suspense>;
+  }
   if (portal) return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <button type="button" onClick={()=>setPortal(null)} className="fixed z-[100] top-3 left-3 rounded-full bg-slate-950/90 border border-amber-400/50 px-4 py-2 text-white text-sm shadow-xl" aria-label="Volver a elegir rol">← Cambiar rol</button>

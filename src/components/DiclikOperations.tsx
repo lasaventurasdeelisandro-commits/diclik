@@ -153,9 +153,7 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
               await api.admin.updateUserStatus(item.id, item.status === "active" ? "suspended" : "active");
               await refresh();
             }, "Estado actualizado.")}>{item.status === "active" ? "Suspender" : "Activar"}</button>
-            {["tecnico", "profesional"].includes(item.role) && <button className={button} disabled={busy} onClick={() => run(async () => {
-              await api.admin.verifyProfessional(item.id, true);
-            }, "Acreditación aprobada.")}>Verificar especialista</button>}
+
           </div>}
         </div>)}
         <h3 className="font-bold">Disputas</h3>
