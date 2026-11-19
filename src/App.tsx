@@ -1,4 +1,5 @@
 import React, { useState, lazy, Suspense } from "react";
+import { ArrowRight, BriefcaseBusiness, MousePointer2, UserRound, Wrench, type LucideIcon } from "lucide-react";
 import { Capacitor, registerPlugin } from "@capacitor/core";
 import { isAdminPage } from "./services/api";
 import { DirectoMobileApp } from "./components/DirectoMobileApp";
@@ -8,10 +9,10 @@ const AdminPage = (import.meta as ImportMeta & { env?: { VITE_DICLIK_ANDROID?: s
 const voice = registerPlugin<{ speak(options: { text: string }): Promise<void> }>("DiclikVoice");
 
 type Portal = "cliente" | "profesional" | "tecnico";
-const roles: { id: Portal; name: string; description: string; accent: string; symbol: string }[] = [
-  { id: "cliente", name: "Cliente", description: "Busca y contrata servicios", accent: "bg-blue-400/15 text-blue-300", symbol: "👥" },
-  { id: "profesional", name: "Profesional", description: "Ofrece tus servicios profesionales", accent: "bg-orange-400/15 text-orange-300", symbol: "👔" },
-  { id: "tecnico", name: "Técnico", description: "Encuentra trabajos de tu oficio", accent: "bg-emerald-400/15 text-emerald-300", symbol: "🛠" },
+const roles: { id: Portal; name: string; description: string; accent: string; icon: LucideIcon }[] = [
+  { id: "cliente", name: "Cliente", description: "Busca y contrata servicios", accent: "bg-blue-400/15 text-blue-300", icon: UserRound },
+  { id: "profesional", name: "Profesional", description: "Ofrece tus servicios profesionales", accent: "bg-orange-400/15 text-orange-300", icon: BriefcaseBusiness },
+  { id: "tecnico", name: "Técnico", description: "Encuentra trabajos de tu oficio", accent: "bg-emerald-400/15 text-emerald-300", icon: Wrench },
 ];
 
 export default function App() {
@@ -40,15 +41,18 @@ export default function App() {
     </div>
   );
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-[#031334] px-5 py-8 text-white"
-      style={{ backgroundImage: "radial-gradient(ellipse at 50% 0%, #0c4387 0%, #031334 70%)" }}>
+    <main className="grid min-h-dvh place-items-center bg-[#08172e] px-5 py-8 text-white">
       <div className="w-full max-w-md">
-        <img
-          src="/assets/brand/diclik-official-watermark.png"
-          alt="Diclik.com. Un clic, miles de soluciones"
-          className="mx-auto h-36 w-full object-contain sm:h-44"
-        />
-        <h1 className="mb-5 mt-3 text-center text-2xl font-bold sm:text-3xl">Elige tu perfil</h1>
+        <header className="mb-9 text-center">
+          <div className="inline-flex items-center gap-3">
+            <span aria-hidden="true" className="grid size-12 place-items-center rounded-xl bg-blue-600 text-white">
+              <MousePointer2 size={25} fill="currentColor" />
+            </span>
+            <span className="text-4xl font-extrabold leading-none tracking-tight">DICLIK<span aria-hidden="true" className="text-amber-400">.</span></span>
+          </div>
+          <p className="mt-3 text-sm text-slate-300 sm:text-base">Un clic, miles de soluciones</p>
+        </header>
+        <h1 className="mb-3 text-lg font-semibold">Elige tu perfil</h1>
         <ul className="space-y-3">
           {roles.map(role => (
             <li key={role.id}>
@@ -59,14 +63,14 @@ export default function App() {
                   setPortal(role.id);
                   handleSpeak(`Bienvenido a DICLIK. Has elegido el perfil de ${role.name}.`);
                 }}
-                className="flex w-full items-center gap-3 rounded-2xl border border-white/15 bg-white/[0.07] p-3 text-left transition-colors hover:border-blue-300/60 hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-300 sm:px-4"
+                className="flex w-full items-center gap-3 rounded-xl border border-slate-700 bg-[#11243e] p-3 text-left transition-colors hover:border-blue-300/60 hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-300 sm:px-4"
               >
-                <span aria-hidden="true" className={`grid size-11 shrink-0 place-items-center rounded-xl text-xl ${role.accent}`}>{role.symbol}</span>
+                <span aria-hidden="true" className={`grid size-11 shrink-0 place-items-center rounded-lg ${role.accent}`}><role.icon size={21} /></span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-base font-bold">{role.name}</span>
                   <span className="mt-0.5 block text-sm leading-snug text-slate-300">{role.description}</span>
                 </span>
-                <span aria-hidden="true" className="pr-1 text-lg text-slate-300">→</span>
+                <ArrowRight aria-hidden="true" size={17} className="mr-1 shrink-0 text-slate-400" />
               </button>
             </li>
           ))}
