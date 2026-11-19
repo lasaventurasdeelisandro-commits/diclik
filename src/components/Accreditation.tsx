@@ -1,5 +1,6 @@
+import { FileText, IdCard, Upload, UserRound } from "lucide-react";
 import { prepareImage, readDataUrl } from "../services/prepareImage";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useId, useState, type FormEvent, type ReactNode } from "react";
 import { api, type Accreditation, type ReviewAccreditation, type IdentitySubmission } from "../services/api";
 
 const kinds: Record<Accreditation["kind"], string> = {
@@ -7,6 +8,42 @@ const kinds: Record<Accreditation["kind"], string> = {
 };
 const statuses = { pending: "En revisión", approved: "Aprobada", rejected: "Rechazada" };
 const button = "rounded-lg border border-amber-400/50 px-3 py-2 text-sm text-amber-200 disabled:opacity-50";
+
+const uploadStyle = {
+  identity: { panel: "border-sky-500/50 bg-sky-950", title: "text-sky-100", action: "bg-sky-200 text-sky-950", Icon: IdCard },
+  portrait: { panel: "border-violet-500/50 bg-violet-950", title: "text-violet-100", action: "bg-violet-200 text-violet-950", Icon: UserRound },
+  evidence: { panel: "border-amber-500/50 bg-amber-950", title: "text-amber-100", action: "bg-amber-200 text-amber-950", Icon: FileText },
+};
+
+function UploadField({ name, action, accept, tone, disabled }: {
+  name: string; action: string; accept: string; tone: keyof typeof uploadStyle; disabled: boolean;
+}) {
+  const [filename, setFilename] = useState("");
+  const descriptionId = useId();
+  return <div className="space-y-1.5">
+    <label className={`relative flex min-h-11 cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm font-bold focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-white ${uploadStyle[tone].action}`}>
+      <Upload className="size-4 shrink-0" aria-hidden="true" />
+      {action}
+      <input type="file" aria-label={action} aria-describedby={descriptionId} name={name} accept={accept} required disabled={disabled}
+        className="absolute inset-0 size-full cursor-pointer opacity-0"
+        onChange={event => setFilename(event.currentTarget.files?.[0]?.name ?? "")} />
+    </label>
+    <p id={descriptionId} className="break-all text-sm text-slate-200" aria-live="polite">{filename || "Sin archivo seleccionado"}</p>
+  </div>;
+}
+
+function UploadSection({ tone, title, children }: {
+  tone: keyof typeof uploadStyle; title: string; children?: ReactNode;
+}) {
+  const { panel, title: titleStyle, Icon } = uploadStyle[tone];
+  return <section className={`space-y-3 rounded-xl border p-3.5 text-sm text-slate-100 ${panel}`}>
+    <h3 className={`flex items-center gap-2 text-lg leading-tight font-bold ${titleStyle}`}>
+      <Icon className="size-5 shrink-0" aria-hidden="true" />
+      {title}
+    </h3>
+    {children}
+  </section>;
+}
 
 async function encodeFile(file: Blob) {
   const url = await readDataUrl(file);
@@ -25,6 +62,7 @@ export function AccountIdentity() {
   const [submitted, setSubmitted] = useState(false);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [formVersion, setFormVersion] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -44,7 +82,7 @@ export function AccountIdentity() {
       await api.accreditation.submitIdentity(await encodeFile(await prepareImage(file, 1600, 1024 * 1024)));
       setSubmitted(true);
       setMessage("Identificación recibida.");
-      form.reset();
+      setFormVersion(version => version + 1);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo enviar la identificación.");
     } finally {
@@ -52,18 +90,17 @@ export function AccountIdentity() {
     }
   }
 
-  return <section className="space-y-2 rounded-xl border border-slate-700 p-3 text-xs">
-    <h3 className="text-sm font-bold">Identificación</h3>
-    <p>{submitted ? "Identificación recibida." : "Sube una foto legible de tu cédula o identificación para solicitar, contratar o cotizar un servicio."}</p>
-    <p>Solo Administración puede consultar el documento.</p>
-    <form onSubmit={submit} className="space-y-2">
-      <label className="block">Foto de cédula o identificación
-        <input name="identity" type="file" accept="image/*" required className="mt-1 block w-full" />
-      </label>
-      <button className={button} disabled={busy}>{busy ? "Enviando identificación…" : submitted ? "Actualizar identificación" : "Enviar identificación"}</button>
+  return <UploadSection tone="identity" title="Cédula o identificación">
+    <p>{submitted ? "Identificación recibida." : "Sube una foto legible de tu documento de identidad."}</p>
+    <p className="text-sky-100/90">Solo Administración puede ver este documento.</p>
+    <form key={formVersion} onSubmit={submit} className="space-y-3">
+      <UploadField name="identity" action="Seleccionar foto de cédula o identificación" accept="image/*" tone="identity" disabled={busy} />
+      <button type="submit" className={`${button} min-h-10`} disabled={busy}>
+        {busy ? "Enviando identificación…" : submitted ? "Actualizar identificación" : "Enviar identificación"}
+      </button>
     </form>
-    {message && <p role="status">{message}</p>}
-  </section>;
+    {message && <p role="status" className="rounded-lg bg-slate-950/65 px-3 py-2">{message}</p>}
+  </UploadSection>;
 }
 
 export function SpecialistAccreditation({ role }: { role: "tecnico" | "profesional" }) {
@@ -71,6 +108,7 @@ export function SpecialistAccreditation({ role }: { role: "tecnico" | "profesion
   const [record, setRecord] = useState<Accreditation | null>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [formVersion, setFormVersion] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -102,7 +140,7 @@ export function SpecialistAccreditation({ role }: { role: "tecnico" | "profesion
         kind, photo: preparedPhoto,
         ...(isReferences ? { references: files, referencesConsent: inputs.get("referencesConsent") === "on" } : { document: files[0] }),
       }));
-      form.reset();
+      setFormVersion(version => version + 1);
       setKind("titulo");
       setMessage("Acreditación enviada a revisión.");
     } catch (error) {
@@ -112,38 +150,43 @@ export function SpecialistAccreditation({ role }: { role: "tecnico" | "profesion
     }
   }
 
-  return <section className="space-y-3 rounded-xl border border-slate-700 p-3 text-xs text-slate-200">
-    <h3 className="text-sm font-bold text-white">Foto y acreditación</h3>
-    {record && <p>Estado <strong>{statuses[record.status]}</strong>{record.reason && <> · {record.reason}</>}</p>}
-    <p>La foto se muestra en tu perfil cuando se aprueba. La evidencia se comparte con Administración para la revisión.</p>
-    {record?.status === "approved" && <p>Si envías nuevos archivos, tu acreditación volverá a revisión.</p>}
-    <form onSubmit={submit} className="space-y-3">
-      <label className="block">Foto de perfil
-        <input name="photo" type="file" accept="image/*" required className="block w-full mt-1" />
-      </label>
-      <label className="block">Tipo de documento
-        <select name="kind" value={kind} onChange={event => setKind(event.target.value as Accreditation["kind"])} className="block mt-1 w-full rounded-lg bg-slate-900 p-2">
+  return <form key={formVersion} onSubmit={submit} className="space-y-3">
+    <UploadSection tone="portrait" title="Foto de perfil">
+      <p>Sube una foto de tu rostro. Aparecerá en tu perfil cuando se apruebe.</p>
+      <UploadField name="photo" action="Seleccionar foto de perfil" accept="image/*" tone="portrait" disabled={busy} />
+    </UploadSection>
+    <UploadSection tone="evidence" title="Documentos de acreditación">
+      {record && <p>Estado <strong>{statuses[record.status]}</strong>{record.reason && <> · {record.reason}</>}</p>}
+      <label className="block font-semibold">Tipo de documento
+        <select name="kind" value={kind} disabled={busy} onChange={event => setKind(event.target.value as Accreditation["kind"])}
+          className="mt-1.5 block min-h-11 w-full rounded-lg border border-amber-500/50 bg-slate-950 px-3 text-white">
           <option value="titulo">Título</option>
           <option value="diploma">Certificado o diploma</option>
           {role === "tecnico" ? <option value="referencias">{kinds.referencias}</option> : <option value="carta">{kinds.carta}</option>}
         </select>
       </label>
       {kind === "referencias" ? <>
-        <p>Adjunta una carta por cliente. Incluye el nombre, un teléfono o correo autorizado, el trabajo realizado y la fecha.</p>
-        {[1, 2, 3].map(number => <label key={number} className="block">Carta {number} (PDF hasta 400 KB o foto)
-          <input name="document" type="file" accept="application/pdf,image/*" required className="block w-full mt-1" />
-        </label>)}
-        <label className="flex gap-2">
-          <input type="checkbox" name="referencesConsent" required />
+        <p>Adjunta una carta por cliente en foto o PDF de hasta 400 KB. Incluye su nombre, contacto autorizado, trabajo realizado y fecha.</p>
+        {[1, 2, 3].map(number => <div key={`carta-${number}`}>
+          <UploadField name="document" action={`Seleccionar carta ${number}`} accept="application/pdf,image/*" tone="evidence" disabled={busy} />
+        </div>)}
+        <label className="flex items-start gap-2">
+          <input className="mt-1 size-4 shrink-0" type="checkbox" name="referencesConsent" required disabled={busy} />
           Confirmo que las cartas son de tres clientes distintos y que autorizaron el uso de su contacto para verificar la referencia.
         </label>
-      </> : <label className="block">Documento (PDF hasta 1 MB o foto)
-        <input name="document" type="file" accept="application/pdf,image/*" required className="block w-full mt-1" />
-      </label>}
-      <button type="submit" className={button} disabled={busy}>{busy ? "Enviando…" : record ? "Enviar nuevos archivos" : "Enviar a revisión"}</button>
-    </form>
-    {message && <p role="status">{message}</p>}
-  </section>;
+      </> : <>
+        <p>Adjunta una foto legible o un PDF de hasta 1 MB.</p>
+        <div key={kind}>
+          <UploadField name="document" action={`Seleccionar ${kinds[kind].toLowerCase()}`} accept="application/pdf,image/*" tone="evidence" disabled={busy} />
+        </div>
+      </>}
+      {record?.status === "approved" && <p>Si envías nuevos archivos, tu acreditación volverá a revisión.</p>}
+      <button type="submit" className={`${button} min-h-10`} disabled={busy}>
+        {busy ? "Enviando…" : "Enviar foto y documentos a revisión"}
+      </button>
+      {message && <p role="status" className="rounded-lg bg-slate-950/65 px-3 py-2">{message}</p>}
+    </UploadSection>
+  </form>;
 }
 
 export function AccreditationReview() {

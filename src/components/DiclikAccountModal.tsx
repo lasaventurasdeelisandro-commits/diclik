@@ -648,7 +648,11 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
                 </select>
               </label>}
 
-              {panelTab === "perfil" && <AccountIdentity key={currentUser.id} />}
+              {panelTab === "perfil" && <AccountIdentity key={`identity-${currentUser.id}`} />}
+
+              {panelTab === "perfil" && (currentUser.role === "tecnico" || currentUser.role === "profesional") &&
+                <div key={`accreditation-${currentUser.id}`}><SpecialistAccreditation role={currentUser.role} /></div>}
+
 
               {panelTab === "perfil" && (
                 <form onSubmit={handleSaveProfile} className="space-y-2.5">
@@ -726,9 +730,6 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
                   </button>
                 </form>
               )}
-
-              {panelTab === "perfil" && (currentUser.role === "tecnico" || currentUser.role === "profesional") &&
-                <div key={currentUser.id}><SpecialistAccreditation role={currentUser.role} /></div>}
 
               {panelTab === "billetera" && (
                 <div className="space-y-2.5">
