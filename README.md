@@ -29,3 +29,18 @@ Para Android, consulta `GUIA_COMPILAR_APK.md`. Define `VITE_API_BASE_URL` con la
 Los veredictos y pendientes están en `INFORME_DICLIK_FASE4.md`.
 
 Para publicar el entorno de pruebas bajo HTTPS, consulta `deploy/ENTORNO_PRUEBAS.md`.
+
+## País e idioma
+
+La pantalla inicial permite elegir un país manualmente o detectarlo por GPS.
+Al pulsar **Detectar con GPS**, se solicita permiso y se envían coordenadas
+redondeadas a dos decimales a BigDataCloud para obtener el código de país.
+Diclik guarda la selección localmente, sin guardar las coordenadas en este flujo.
+
+La entrada está disponible en español, inglés y portugués. El selector muestra
+el código de moneda de cada país incluido. Los portales operativos y los importes
+actuales siguen habilitados para República Dominicana (DOP). Las demás opciones
+son una vista previa regional. Para abrir un mercado se requiere configurar y
+validar en el servidor su moneda operativa, reglas fiscales y facturación.
+La ubicación del dispositivo sirve para sugerir el país y no determina por sí
+sola la jurisdicción fiscal de una operación.

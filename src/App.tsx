@@ -2,6 +2,7 @@ import React, { useState, lazy, Suspense } from "react";
 import { ArrowRight, BriefcaseBusiness, UserRound, Wrench, type LucideIcon } from "lucide-react";
 import { Capacitor, registerPlugin } from "@capacitor/core";
 import { isAdminPage } from "./services/api";
+import { MarketSelector, markets, readMarket } from "./components/MarketSelector";
 import { DirectoMobileApp } from "./components/DirectoMobileApp";
 
 const AdminPage = (import.meta as ImportMeta & { env?: { VITE_DICLIK_ANDROID?: string } }).env?.VITE_DICLIK_ANDROID === "true" ? null : lazy(() => import("./components/AdminPage"));
@@ -16,6 +17,8 @@ const roles: { id: Portal; name: string; description: string; icon: LucideIcon }
 ];
 
 export default function App() {
+  const [market, setMarket] = useState(readMarket);
+  const language = markets[market].language;
   const [portal,setPortal] = useState<Portal|null>(null);
   const [voiceError, setVoiceError] = useState("");
   const handleSpeak = (text:string) => {
@@ -41,7 +44,7 @@ export default function App() {
     </div>
   );
   return (
-    <main className="grid min-h-dvh place-items-center bg-[#0b1424] bg-[radial-gradient(ellipse_at_top,#192e48,transparent_65%)] px-5 py-7 text-white lg:px-10">
+    <main lang={markets[market].locale} className="grid min-h-dvh place-items-center bg-[#0b1424] bg-[radial-gradient(ellipse_at_top,#192e48,transparent_65%)] px-5 py-7 text-white lg:px-10">
       <div className="w-full max-w-md lg:grid lg:max-w-5xl lg:grid-cols-2 lg:items-center">
         <header className="mb-6 text-center lg:mb-0 lg:px-12">
           {/* The original artwork also contains lettering below the emblem. */}
@@ -54,11 +57,12 @@ export default function App() {
             />
           </div>
           <p className="text-5xl font-bold leading-none tracking-tight text-[#f7f1e7] lg:text-7xl">Diclik</p>
-          <p className="mt-3 text-sm text-slate-300 lg:text-lg">Un clic, miles de soluciones</p>
+          <p className="mt-3 text-sm text-slate-300 lg:text-lg">{language === "en" ? "One click, thousands of solutions" : language === "pt" ? "Um clique, milhares de soluções" : "Un clic, miles de soluciones"}</p>
         </header>
         <section aria-labelledby="profile-heading" className="border-t border-[#c4a16b]/25 pt-5 lg:border-t-0 lg:border-l lg:py-8 lg:pl-12">
-          <h1 id="profile-heading" className="mb-4 text-xl font-semibold tracking-tight text-[#f7f1e7] lg:mb-6 lg:text-3xl">Elige tu perfil</h1>
-          <ul className="space-y-3">
+          <MarketSelector market={market} onChange={setMarket} />
+          <h1 id="profile-heading" className="mb-4 text-xl font-semibold tracking-tight text-[#f7f1e7] lg:mb-6 lg:text-3xl">{market === "DO" ? "Elige tu perfil" : markets[market].name}</h1>
+          {market === "DO" && <ul className="space-y-3">
             {roles.map(role => (
               <li key={role.id}>
                 <button
@@ -79,8 +83,8 @@ export default function App() {
                 </button>
               </li>
             ))}
-          </ul>
-          <p className="mt-5 text-center text-xs text-slate-400">Creado por Elisandro Álvarez</p>
+          </ul>}
+          <p className="mt-5 text-center text-xs text-slate-400">{language === "en" ? "Created by Elisandro Álvarez" : language === "pt" ? "Criado por Elisandro Álvarez" : "Creado por Elisandro Álvarez"}</p>
         </section>
       </div>
     </main>
