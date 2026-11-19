@@ -1,3 +1,4 @@
+import type { QuickAccessCategory } from "../quickAccess";
 /**
  * Diclik.com — Enterprise API Client
  * Handles real HTTP communication with Express & PostgreSQL backend
@@ -13,6 +14,11 @@ export type Accreditation = {
   reason: string | null;
 };
 export type ReviewAccreditation = Accreditation & { user_id: string; full_name: string; role: string };
+export type SponsoredProfile = { id: string; name: string; avatar?: string; trade: string; rating: number; reviewCount: number };
+export type SponsoredAdministration = {
+  profiles: { id: string; full_name: string; role: string; trade: string }[];
+  listings: { user_id: string; full_name: string; category: QuickAccessCategory; expires_at: string; payment_reference: string }[];
+};
 export type IdentitySubmission = { user_id: string; full_name: string; role: string; submitted_at: string };
 type UploadFile = { mime: string; data: string };
 
@@ -184,6 +190,8 @@ export const api = {
       budgetStrategy?: "intemperie" | "minimo";
       minBudget?: number;
       photos?: string[];
+      preferredSpecialistId?: string;
+      sponsoredCategory?: QuickAccessCategory;
     }) {
       const res = await fetch(`${API_BASE}/services`, {
         method: "POST",
@@ -360,6 +368,10 @@ export const api = {
   },
 
   radar: {
+    async sponsored(category: QuickAccessCategory, signal?: AbortSignal): Promise<SponsoredProfile[]> {
+      const res = await fetch(`${API_BASE}/radar/sponsored?category=${encodeURIComponent(category)}`, { signal });
+      return handleResponse(res, "No se pudo cargar la lista patrocinada.");
+    },
     async scanRequests(role: "tecnico" | "profesional", center: { lat: number; lng: number }, radius: number) {
       const query = new URLSearchParams({
         role, lat: center.lat.toFixed(2), lng: center.lng.toFixed(2), radius: String(radius),
@@ -495,6 +507,22 @@ export const api = {
   },
 
   admin: {
+    async listSponsored(): Promise<SponsoredAdministration> {
+      const res = await fetch(`${API_BASE}/admin/sponsored`, { headers: getAuthHeader() });
+      return handleResponse(res, "No se pudieron consultar las publicaciones patrocinadas.");
+    },
+    async publishSponsored(data: { userId: string; category: QuickAccessCategory; expiresAt: string; reference: string }) {
+      const res = await fetch(`${API_BASE}/admin/sponsored`, {
+        method: "PUT", headers: { "Content-Type": "application/json", ...getAuthHeader() }, body: JSON.stringify(data),
+      });
+      return handleResponse(res, "No se pudo publicar el perfil.");
+    },
+    async removeSponsored(userId: string, category: QuickAccessCategory) {
+      const res = await fetch(`${API_BASE}/admin/sponsored/${encodeURIComponent(userId)}/${category}`, {
+        method: "DELETE", headers: getAuthHeader(),
+      });
+      return handleResponse(res, "No se pudo retirar la publicación.");
+    },
     async getBankSettlements(page: number, signal?: AbortSignal) {
       const res = await fetch(`${API_BASE}/admin/bank-settlements?page=${page}`, { headers: getAuthHeader(), signal });
       return handleResponse(res, "No se pudieron cargar las liquidaciones.");

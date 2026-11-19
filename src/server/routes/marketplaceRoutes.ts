@@ -1,3 +1,4 @@
+import { isQuickAccessCategory } from "../../quickAccess.ts";
 import { commissionBasisPoints, commissionInCents } from "../../commission.ts";
 import { Router, Request, Response } from "express";
 import crypto from "crypto";
@@ -88,6 +89,14 @@ marketplaceRouter.get("/services", async (req: Request, res: Response) => {
       WHERE 1=1
     `;
     const params: any[] = [];
+    if (caller?.role !== "admin") {
+      if (caller?.id) {
+        params.push(caller.id);
+        query += ` AND (sr.preferred_professional_id IS NULL OR sr.preferred_professional_id = $1 OR sr.client_id = $1)`;
+      } else {
+        query += " AND sr.preferred_professional_id IS NULL";
+      }
+    }
 
     if (category && category !== "todas") {
       params.push(category);
@@ -134,7 +143,7 @@ marketplaceRouter.get("/services", async (req: Request, res: Response) => {
 marketplaceRouter.post("/services", requireAuth, requireIdentity, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
-    const { title, description, categoryId, targetRole, address, lat, lng, urgency, budgetStrategy, minBudget, photos } = req.body;
+    const { title, description, categoryId, targetRole, address, lat, lng, urgency, budgetStrategy, minBudget, photos, preferredSpecialistId, sponsoredCategory } = req.body;
 
     if (photos != null && (!Array.isArray(photos) || photos.length > 8 || !photos.every(validServicePhoto))) {
       res.status(400).json({ error: "Adjunta hasta ocho fotos válidas. Si alguna no se puede preparar, vuelve a seleccionarla." });
@@ -158,7 +167,12 @@ marketplaceRouter.post("/services", requireAuth, requireIdentity, async (req: Au
       return;
     }
 
-    const validRole = targetRole === "profesional" ? "profesional" : "tecnico";
+    if ((preferredSpecialistId != null || sponsoredCategory != null) &&
+        (typeof preferredSpecialistId !== "string" || !isQuickAccessCategory(sponsoredCategory) || preferredSpecialistId === user.id)) {
+      res.status(400).json({ error: "Elige un especialista patrocinado válido." });
+      return;
+    }
+    let validRole = targetRole === "profesional" ? "profesional" : "tecnico";
     const validUrgency = ["urgente", "express", "programado"].includes(urgency) ? urgency : "urgente";
     const validStrategy = ["intemperie", "minimo"].includes(budgetStrategy) ? budgetStrategy : "intemperie";
 
@@ -166,11 +180,19 @@ marketplaceRouter.post("/services", requireAuth, requireIdentity, async (req: Au
     const releaseCode = crypto.randomInt(1000, 10000).toString();
 
     await db.transaction(async (tx) => {
+      if (preferredSpecialistId) {
+        const selected = await tx.query(
+          "SELECT role FROM active_sponsored_specialists WHERE user_id = $1 AND category = $2",
+          [preferredSpecialistId, sponsoredCategory],
+        );
+        if (!selected.rows.length) throw new Error("SPONSORED_UNAVAILABLE");
+        validRole = selected.rows[0].role;
+      }
       await tx.query(
         `INSERT INTO service_requests (
           id, client_id, category_id, target_role, title, description, address,
-          lat, lng, urgency, budget_strategy, min_budget, status, photos, release_code, location_confirmed
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'open', $13, $14, $15);`,
+          lat, lng, urgency, budget_strategy, min_budget, status, photos, release_code, location_confirmed, preferred_professional_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'open', $13, $14, $15, $16);`,
         [
           requestId,
           user.id,
@@ -186,7 +208,8 @@ marketplaceRouter.post("/services", requireAuth, requireIdentity, async (req: Au
           parsedBudget,
           photos ?? [],
           releaseCode,
-          lat != null && lng != null
+          lat != null && lng != null,
+          preferredSpecialistId || null
         ]
       );
 
@@ -196,6 +219,15 @@ marketplaceRouter.post("/services", requireAuth, requireIdentity, async (req: Au
          ON CONFLICT (user_id) DO UPDATE SET total_requests = client_profiles.total_requests + 1;`,
         [user.id, String(address).trim().slice(0, 300), lat ?? null, lng ?? null]
       );
+
+      if (preferredSpecialistId) {
+        await tx.query(
+          `INSERT INTO notifications (id, user_id, type, title, body, data)
+           VALUES ($1, $2, 'DIRECT_REQUEST', 'Solicitud directa en Diclik', $3, $4)`,
+          ["notif_" + crypto.randomUUID().slice(0, 12), preferredSpecialistId,
+           "Un cliente te eligió desde Acceso rápido. Abre Solicitudes para enviar una cotización.", JSON.stringify({ requestId })],
+        );
+      }
 
       await tx.query(
         "INSERT INTO audit_logs (id, actor_id, event_type, target_table, target_id, details) VALUES ($1, $2, 'SERVICE_REQUEST_CREATED', 'service_requests', $3, $4);",
@@ -209,6 +241,10 @@ marketplaceRouter.post("/services", requireAuth, requireIdentity, async (req: Au
       releaseCode
     });
   } catch (error: any) {
+    if (error?.message === "SPONSORED_UNAVAILABLE") {
+      res.status(409).json({ error: "El perfil patrocinado ya no está disponible. Elige otro especialista o publica una solicitud abierta." });
+      return;
+    }
     console.error("[Create Service Request Error]:", error?.message);
     res.status(500).json({ error: "Error al publicar solicitud de servicio" });
   }
@@ -221,7 +257,7 @@ marketplaceRouter.get("/services/:id", async (req: Request, res: Response) => {
     const { id } = req.params;
     const result = await db.query(
       `SELECT sr.id, sr.client_id, sr.category_id, sr.target_role, sr.title, sr.description,
-              sr.address, sr.lat, sr.lng, sr.urgency, sr.budget_strategy, sr.min_budget,
+              sr.preferred_professional_id, sr.address, sr.lat, sr.lng, sr.urgency, sr.budget_strategy, sr.min_budget,
               sr.status, sr.accepted_offer_id, sr.photos, sr.created_at, sr.updated_at,
               u.full_name as client_name, u.avatar_url as client_avatar, u.phone as client_phone,
               sc.name as category_name, sc.icon as category_icon
@@ -236,6 +272,11 @@ marketplaceRouter.get("/services/:id", async (req: Request, res: Response) => {
       return;
     }
     const row = result.rows[0];
+    if (row.preferred_professional_id && caller?.role !== "admin" &&
+        caller?.id !== row.client_id && caller?.id !== row.preferred_professional_id) {
+      res.status(404).json({ error: "Solicitud de servicio no encontrada" });
+      return;
+    }
     const canSeePhone = caller && (caller.role === "admin" || caller.id === row.client_id);
     res.json({
       ...row,
@@ -342,8 +383,13 @@ marketplaceRouter.get("/services/:id/offers", async (req: Request, res: Response
     const caller = await optionalUser(req);
     const { id } = req.params;
 
-    const reqInfo = await db.query("SELECT client_id FROM service_requests WHERE id = $1;", [id]);
+    const reqInfo = await db.query("SELECT client_id, preferred_professional_id FROM service_requests WHERE id = $1;", [id]);
     const ownerId = reqInfo.rows[0]?.client_id;
+    const preferred = reqInfo.rows[0]?.preferred_professional_id;
+    if (preferred && caller?.role !== "admin" && caller?.id !== ownerId && caller?.id !== preferred) {
+      res.status(404).json({ error: "Solicitud de servicio no encontrada" });
+      return;
+    }
 
     const result = await db.query(
       `SELECT o.*,
@@ -396,6 +442,10 @@ marketplaceRouter.post("/services/:id/offers", requireAuth, requireRole("tecnico
     }
 
     const serviceReq = reqQuery.rows[0];
+    if (serviceReq.preferred_professional_id && serviceReq.preferred_professional_id !== proUser.id) {
+      res.status(403).json({ error: "La solicitud está dirigida a otro especialista." });
+      return;
+    }
     if (proUser.id === serviceReq.client_id) {
       res.status(403).json({ error: "No puedes cotizar tu propia solicitud." });
       return;

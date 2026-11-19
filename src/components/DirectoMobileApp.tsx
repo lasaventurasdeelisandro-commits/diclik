@@ -1,3 +1,6 @@
+import { QuickAccess } from "./QuickAccess";
+import { quickAccess, type QuickAccessCategory } from "../quickAccess";
+import type { SponsoredProfile } from "../services/api";
 import { prepareImage, readDataUrl } from "../services/prepareImage";
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { ServiceLocation, type ServicePoint } from "./ServiceLocation";
@@ -1499,6 +1502,8 @@ export function DirectoMobileApp({
   >("home");
 
   // Client Universal Search Engine State
+  const [preferredSpecialist, setPreferredSpecialist] = useState<{ category: QuickAccessCategory; profile: SponsoredProfile } | null>(null);
+  const serviceFormRef = useRef<HTMLDivElement>(null);
   const [clientSearchQuery, setClientSearchQuery] = useState<string>("");
   const [activeRequestedTrade, setActiveRequestedTrade] = useState<string>("Técnicos y Profesionales en tu Zona");
   const [isSearchingRadar, setIsSearchingRadar] = useState<boolean>(false);
@@ -1771,7 +1776,9 @@ export function DirectoMobileApp({
           lat: servicePoint.lat,
           lng: servicePoint.lng,
           categoryId: registeredCategory?.id,
-          targetRole: detectedTax.targetRole,
+          targetRole: preferredSpecialist ? quickAccess[preferredSpecialist.category].role : detectedTax.targetRole,
+          preferredSpecialistId: preferredSpecialist?.profile.id,
+          sponsoredCategory: preferredSpecialist?.category,
           urgency: clientUrgency,
           budgetStrategy: clientPriceStrategy,
           minBudget: minNum,
@@ -1779,7 +1786,9 @@ export function DirectoMobileApp({
         });
         setPublishedRequestId(result.requestId);
         setCurrentScreen("requests_feed");
-        const searching = detectedTax.targetRole === "profesional" ? "Buscando profesionales." : "Buscando técnicos.";
+        const searching = preferredSpecialist ? `Solicitud enviada a ${preferredSpecialist.profile.name}.`
+          : detectedTax.targetRole === "profesional" ? "Buscando profesionales." : "Buscando técnicos.";
+        setPreferredSpecialist(null);
         setPublicationMessage(`${searching} Aquí podrás revisar las ofertas recibidas.`);
         announceWork("published", `Solicitud publicada. ${searching}`);
       } catch (error) {
@@ -2317,7 +2326,7 @@ export function DirectoMobileApp({
         {currentScreen === "home" && (isDemo || clientPortal) && (
           <div className="space-y-3.5 animate-fadeIn">
             {/* COMPREHENSIVE CLIENT REQUEST BUILDER CARD */}
-            <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 border-2 border-amber-400/60 p-4 rounded-3xl shadow-xl space-y-3.5 relative overflow-hidden">
+            <div ref={serviceFormRef} className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 border-2 border-amber-400/60 p-4 rounded-3xl shadow-xl space-y-3.5 relative overflow-hidden">
               {/* Header Badges */}
               <div className="flex items-center justify-between">
                 <span className="text-[10px] bg-amber-400 text-slate-950 font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider flex items-center space-x-1 shadow-sm">
@@ -2605,6 +2614,11 @@ export function DirectoMobileApp({
               {!isDemo && (publishing || publicationMessage) && <p role="status" className="rounded-lg border border-amber-400/40 bg-slate-950 px-3 py-2 text-sm text-amber-100">
                 {publishing ? "Publicando tu solicitud…" : publicationMessage}
               </p>}
+              {preferredSpecialist && <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-400/50 bg-amber-950 p-3 text-sm">
+                <p>Solicitud directa a <strong>{preferredSpecialist.profile.name}</strong></p>
+                <button type="button" className="font-bold text-amber-200 underline" onClick={() => setPreferredSpecialist(null)}>Quitar selección</button>
+              </div>}
+
               {/* PRIMARY CTA BUTTON: SOLICITAR SERVICIO Y ABRIR RADAR DE NEGOCIACIÓN */}
               <button
                 onClick={() => handleClientSearchAndRequest()}
@@ -2617,93 +2631,13 @@ export function DirectoMobileApp({
               </button>
             </div>
 
-            {/* DIRECT CATEGORY FAST TILES */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between text-xs px-1">
-                <span className="font-extrabold text-slate-300 uppercase tracking-wider text-[10px]">
-                  Acceso Rápido por Especialidad
-                </span>
-                <span className="text-[10px] text-amber-400 font-bold">Pago Escrow RD$</span>
-              </div>
+            {!isDemo && <QuickAccess currentUserId={authUser?.id} onChoose={(category, profile) => {
+              setPreferredSpecialist({ category, profile });
+              setClientSearchQuery(category === "tecnico" || category === "profesional" ? profile.trade : quickAccess[category].query);
+              setPublicationMessage("");
+              serviceFormRef.current?.scrollIntoView({ block: "start" });
+            }} />}
 
-              <div className="grid grid-cols-2 gap-2.5">
-                <button
-                  onClick={() => {
-                    setClientSearchQuery("Plomero urgente");
-                    handleClientSearchAndRequest("Plomería y Fugas");
-                  }}
-                  className="p-3.5 bg-slate-800/90 hover:bg-slate-800 border border-slate-700/90 hover:border-amber-400/50 rounded-2xl text-left transition-all cursor-pointer active:scale-95 group shadow-sm"
-                >
-                  <div className="flex items-center justify-between mb-1.5">
-                    <div className="w-9 h-9 rounded-xl bg-amber-400/20 text-amber-400 flex items-center justify-center group-hover:scale-110 transition-transform">
-                      <Wrench className="w-4 h-4" />
-                    </div>
-                    <span className="text-[9px] bg-emerald-500/20 text-emerald-300 font-bold px-1.5 py-0.5 rounded">
-                      2 cerca
-                    </span>
-                  </div>
-                  <div className="font-extrabold text-xs text-white">Plomería 24/7</div>
-                  <div className="text-[10px] text-slate-400">Fugas, bombas, tinacos</div>
-                </button>
-
-                <button
-                  onClick={() => {
-                    setClientSearchQuery("Electricista");
-                    handleClientSearchAndRequest("Electricidad y Cortos");
-                  }}
-                  className="p-3.5 bg-slate-800/90 hover:bg-slate-800 border border-slate-700/90 hover:border-indigo-400/50 rounded-2xl text-left transition-all cursor-pointer active:scale-95 group shadow-sm"
-                >
-                  <div className="flex items-center justify-between mb-1.5">
-                    <div className="w-9 h-9 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center group-hover:scale-110 transition-transform">
-                      <Zap className="w-4 h-4" />
-                    </div>
-                    <span className="text-[9px] bg-emerald-500/20 text-emerald-300 font-bold px-1.5 py-0.5 rounded">
-                      2 cerca
-                    </span>
-                  </div>
-                  <div className="font-extrabold text-xs text-white">Electricidad</div>
-                  <div className="text-[10px] text-slate-400">Cortos, paneles, inversores</div>
-                </button>
-
-                <button
-                  onClick={() => {
-                    setClientSearchQuery("Cerrajero");
-                    handleClientSearchAndRequest("Cerrajería y Chapas");
-                  }}
-                  className="p-3.5 bg-slate-800/90 hover:bg-slate-800 border border-slate-700/90 hover:border-emerald-400/50 rounded-2xl text-left transition-all cursor-pointer active:scale-95 group shadow-sm"
-                >
-                  <div className="flex items-center justify-between mb-1.5">
-                    <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center group-hover:scale-110 transition-transform">
-                      <Key className="w-4 h-4" />
-                    </div>
-                    <span className="text-[9px] bg-emerald-500/20 text-emerald-300 font-bold px-1.5 py-0.5 rounded">
-                      1 cerca
-                    </span>
-                  </div>
-                  <div className="font-extrabold text-xs text-white">Cerrajería</div>
-                  <div className="text-[10px] text-slate-400">Aperturas, chapas smart</div>
-                </button>
-
-                <button
-                  onClick={() => {
-                    setClientSearchQuery("Arquitecto / Ingeniero");
-                    handleClientSearchAndRequest("Arquitectos e Ingenieros");
-                  }}
-                  className="p-3.5 bg-slate-800/90 hover:bg-slate-800 border border-slate-700/90 hover:border-sky-400/50 rounded-2xl text-left transition-all cursor-pointer active:scale-95 group shadow-sm"
-                >
-                  <div className="flex items-center justify-between mb-1.5">
-                    <div className="w-9 h-9 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center group-hover:scale-110 transition-transform">
-                      <Sparkles className="w-4 h-4" />
-                    </div>
-                    <span className="text-[9px] bg-emerald-500/20 text-emerald-300 font-bold px-1.5 py-0.5 rounded">
-                      3 cerca
-                    </span>
-                  </div>
-                  <div className="font-extrabold text-xs text-white">Profesionales</div>
-                  <div className="text-[10px] text-slate-400">DRO, planos, peritajes</div>
-                </button>
-              </div>
-            </div>
           </div>
         )}
 

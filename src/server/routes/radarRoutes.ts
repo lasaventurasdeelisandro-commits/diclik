@@ -1,3 +1,4 @@
+import { isQuickAccessCategory } from "../../quickAccess.ts";
 import { Router, Request, Response } from "express";
 import { db } from "../db/index.ts";
 
@@ -127,6 +128,7 @@ radarRouter.get("/requests", async (req: Request, res: Response) => {
               ROUND(r.lng::numeric, 2)::double precision AS "approxLng"
        FROM service_requests r LEFT JOIN service_categories c ON c.id = r.category_id
        WHERE r.target_role = $1 AND r.status IN ('open', 'negotiating') AND r.location_confirmed
+         AND r.preferred_professional_id IS NULL
          AND r.lat BETWEEN $2 AND $3
        ORDER BY r.created_at DESC`,
       [role, centerLat - latRange, centerLat + latRange],
@@ -137,5 +139,22 @@ radarRouter.get("/requests", async (req: Request, res: Response) => {
     })).filter(row => row.distanceKm <= radius).slice(0, 50));
   } catch {
     res.status(500).json({ error: "No se pudieron consultar las solicitudes del radar." });
+  }
+});
+
+radarRouter.get("/sponsored", async (req: Request, res: Response) => {
+  if (!isQuickAccessCategory(req.query.category)) {
+    res.status(400).json({ error: "Selecciona un acceso rápido válido." });
+    return;
+  }
+  try {
+    const result = await db.query(
+      `SELECT user_id AS id, full_name AS name, avatar_url AS avatar, role, trade, rating, review_count AS "reviewCount"
+       FROM active_sponsored_specialists WHERE category = $1
+       ORDER BY full_name, user_id LIMIT 50;`, [req.query.category],
+    );
+    res.json(result.rows);
+  } catch {
+    res.status(500).json({ error: "No se pudo cargar la lista patrocinada." });
   }
 });

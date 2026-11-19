@@ -1,3 +1,4 @@
+import { SponsoredAdministration } from "./SponsoredAdministration";
 import { useEffect, useState, type FormEvent } from "react";
 import { api } from "../services/api";
 import type { AuthUserSummary } from "./DiclikAccountModal";
@@ -10,7 +11,7 @@ import { AccreditationReview } from "./Accreditation";
 export default function AdminPage() {
   const [section, setSection] = useState(() => {
     const hash = window.location.hash.slice(1);
-    return ["contabilidad", "acreditaciones", "usuarios"].includes(hash) ? hash : "operaciones";
+    return ["contabilidad", "acreditaciones", "usuarios", "patrocinados"].includes(hash) ? hash : "operaciones";
   });
   const [user, setUser] = useState<AuthUserSummary | null>(null);
   const [busy, setBusy] = useState(false);
@@ -27,7 +28,7 @@ export default function AdminPage() {
   useEffect(() => {
     function syncSection() {
       const hash = window.location.hash.slice(1);
-      setSection(["contabilidad", "acreditaciones", "usuarios"].includes(hash) ? hash : "operaciones");
+      setSection(["contabilidad", "acreditaciones", "usuarios", "patrocinados"].includes(hash) ? hash : "operaciones");
     }
     window.addEventListener("hashchange", syncSection);
     return () => window.removeEventListener("hashchange", syncSection);
@@ -61,6 +62,7 @@ export default function AdminPage() {
             ["contabilidad", "Contabilidad"],
             ["acreditaciones", "Acreditaciones"],
             ["usuarios", "Usuarios y disputas"],
+            ["patrocinados", "Acceso rápido"],
           ].map(([id, name]) => <a key={id} href={`#${id}`}
             aria-current={section === id ? "page" : undefined}
             className={`rounded-lg border px-4 py-2 text-sm font-bold ${section === id ? "border-amber-400 bg-amber-400 text-slate-950" : "border-slate-700 text-slate-200"}`}>
@@ -70,6 +72,7 @@ export default function AdminPage() {
         {section === "operaciones" && <AdminDashboard />}
         {section === "contabilidad" && <><AccountingDashboard /><CommissionPreview /></>}
         {section === "acreditaciones" && <AccreditationReview />}
+        {section === "patrocinados" && <SponsoredAdministration />}
         {section === "usuarios" && <DiclikOperations view="requests" role="cliente" user={user} onSignIn={() => setUser(null)} onContractAccepted={() => {}} />}
       </> : <form onSubmit={signIn} className="max-w-sm space-y-3 rounded-xl border border-slate-700 p-4">
         <label className="block">Correo de administración

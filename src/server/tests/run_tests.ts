@@ -960,6 +960,48 @@ export async function runAllTests() {
       return "Profesional registrado; mensajes persistidos y acceso de terceros bloqueado.";
     });
 
+    await runTest("12. Patrocinio y solicitud directa", async () => {
+      const admin = { Authorization: `Bearer ${adminToken}` };
+      const client = { Authorization: `Bearer ${clientToken}` };
+      const specialist = { Authorization: `Bearer ${proToken}` };
+      const accreditation = await apiCall("/accreditation/mine", { headers: specialist });
+      const approved = await apiCall(`/accreditation/review/${proId}`, {
+        method: "PATCH", headers: admin,
+        body: JSON.stringify({ revision: accreditation.body.revision, decision: "approved" }),
+      });
+      if (approved.status !== 200) throw new Error("No se pudo acreditar al técnico de prueba.");
+      const sponsor = { userId: proId, category: "tecnico", expiresAt: new Date(Date.now() + 3600_000).toISOString(), reference: "PAGO-QA" };
+      const publish = (headers: Record<string, string>, data = sponsor) =>
+        apiCall("/admin/sponsored", { method: "PUT", headers, body: JSON.stringify(data) });
+      if ((await publish(client)).status !== 403 || (await publish(admin, { ...sponsor, category: "pediatria" })).status !== 400 ||
+          (await publish(admin)).status !== 200) throw new Error("Falló la autorización o la elegibilidad del patrocinio.");
+      const directory = await apiCall("/radar/sponsored?category=tecnico");
+      if (!directory.body.some((item: any) => item.id === proId && !("payment_reference" in item))) {
+        throw new Error("No apareció el perfil o se expuso la referencia de pago.");
+      }
+      const trial = { title: "Reparación directa", description: "Prueba de selección", address: "Dirección de prueba",
+        lat: 18.48, lng: -69.94, preferredSpecialistId: proId, sponsoredCategory: "tecnico" };
+      const post = () => apiCall("/services", { method: "POST", headers: client, body: JSON.stringify(trial) });
+      const direct = await post();
+      if (direct.status !== 201) throw new Error("No se pudo publicar la solicitud directa.");
+      const id = direct.body.requestId;
+      const publicList = await apiCall("/services?targetRole=tecnico");
+      const privateList = await apiCall("/services?targetRole=tecnico", { headers: specialist });
+      const radar = await apiCall("/radar/requests?role=tecnico");
+      if (publicList.body.some((item: any) => item.id === id) || radar.body.some((item: any) => item.id === id) ||
+          !privateList.body.some((item: any) => item.id === id && item.address === null) ||
+          (await apiCall(`/services/${id}`)).status !== 404 || (await apiCall(`/services/${id}/offers`)).status !== 404) {
+        throw new Error("La solicitud directa no quedó reservada al cliente y al destinatario.");
+      }
+      const offer = await apiCall(`/services/${id}/offers`, {
+        method: "POST", headers: specialist, body: JSON.stringify({ price: 1000, etaMinutes: 15 }),
+      });
+      if (offer.status !== 201) throw new Error("El especialista elegido no pudo cotizar.");
+      await apiCall(`/admin/sponsored/${proId}/tecnico`, { method: "DELETE", headers: admin });
+      if ((await post()).status !== 409) throw new Error("Se aceptó una solicitud nueva con patrocinio retirado.");
+      return "Patrocinio autorizado, directorio público, solicitud privada y cotización del especialista elegido.";
+    });
+
     console.log("\n==================================================================");
     const total = testResults.length;
     const passed = testResults.filter((r) => r.passed).length;
