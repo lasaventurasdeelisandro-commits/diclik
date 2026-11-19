@@ -531,7 +531,25 @@ export async function runAllTests() {
 
     // 7. Radar & Notifications Endpoints
     await runTest("7. Radar Geoespacial (Ocultación de Coordenadas) y Notificaciones Persistentes", async () => {
-      const radar = await apiCall("/radar/specialists?lat=18.4861&lng=-69.9312&radius=20");
+      const radarPath = "/radar/specialists?lat=18.4861&lng=-69.9312&radius=20";
+      const headers = { Authorization: `Bearer ${proToken}` };
+      const me = await apiCall("/auth/me", { headers });
+      const appears = ({ body }: { body: { id: string }[] }) =>
+        Array.isArray(body) && body.some(specialist => specialist.id === me.body.user.id);
+      if (appears(await apiCall(radarPath))) throw new Error("El especialista apareció sin compartir su ubicación");
+      const updateAvailability = (data: object) => apiCall("/auth/profile", {
+        method: "PUT", headers, body: JSON.stringify(data)
+      });
+      const invalid = await updateAvailability({ isAvailable: true });
+      if (invalid.status !== 400) throw new Error("El perfil aceptó activarse sin GPS");
+      const activated = await updateAvailability({ isAvailable: true, location: { lat: 18.49, lng: -69.93 } });
+      if (activated.status !== 200) throw new Error("El especialista no pudo compartir su ubicación");
+      const radar = await apiCall(radarPath);
+      if (!appears(radar)) throw new Error("El especialista disponible no apareció en el radar");
+      const hidden = await updateAvailability({ isAvailable: false });
+      if (hidden.status !== 200 || appears(await apiCall(radarPath))) {
+        throw new Error("El especialista no pudo ocultarse del radar");
+      }
       if (radar.status !== 200 || !Array.isArray(radar.body) || radar.body.length === 0) {
         throw new Error("Radar no devolvió especialistas");
       }

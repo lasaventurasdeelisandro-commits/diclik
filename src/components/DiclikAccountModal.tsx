@@ -14,6 +14,7 @@ import {
   ShieldCheck
 } from "lucide-react";
 import { api } from "../services/api.ts";
+import { getCurrentLocation } from "../services/geolocation";
 
 export interface AuthUserSummary {
   id: string;
@@ -68,6 +69,7 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
   const [editPhone, setEditPhone] = useState("");
   const [editAddress, setEditAddress] = useState("");
   const [editBio, setEditBio] = useState("");
+  const [radarAvailable, setRadarAvailable] = useState<boolean | null>(null);
 
   // Action modal feedback states
   const [loading, setLoading] = useState(false);
@@ -97,6 +99,7 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
         setEditPhone(u.phone || "");
         setEditAddress(meData.profile?.default_address || "");
         setEditBio(meData.profile?.bio || "");
+        setRadarAvailable(Boolean(meData.profile?.is_available && meData.profile.lat != null && meData.profile.lng != null));
       }
       if (ledgerData) setWallet(ledgerData);
       setTransactions(Array.isArray(txData) ? txData : []);
@@ -203,6 +206,21 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
         onAuthChanged({ ...currentUser, fullName: editName.trim(), phone: editPhone.trim() });
       }
       setFeedback({ type: "ok", msg: "Perfil actualizado en PostgreSQL." });
+    } catch (err: any) {
+      setFeedback({ type: "err", msg: err.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRadarAvailability = async (available: boolean) => {
+    setLoading(true);
+    setFeedback(null);
+    try {
+      const location = available ? await getCurrentLocation() : undefined;
+      await api.auth.updateProfile({ isAvailable: available, location });
+      setRadarAvailable(available);
+      setFeedback({ type: "ok", msg: available ? "Ubicación actualizada. Ya apareces en el radar de clientes cercanos." : "Tu perfil está oculto en el radar." });
     } catch (err: any) {
       setFeedback({ type: "err", msg: err.message });
     } finally {
@@ -629,6 +647,24 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
                         className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white mt-0.5"
                       />
                     </div>
+                  )}
+                  {(currentUser.role === "tecnico" || currentUser.role === "profesional") && (
+                    <section className="rounded-xl border border-slate-700 p-3 space-y-2">
+                      <p className="text-xs font-bold text-white">Disponibilidad en el radar</p>
+                      {radarAvailable !== null && (
+                        <p className="text-xs text-slate-300">{radarAvailable ? "Visible para clientes cercanos" : "Oculto"}</p>
+                      )}
+                      <button type="button" disabled={loading || radarAvailable === null} onClick={() => handleRadarAvailability(true)}
+                        className="mr-2 rounded-lg border border-amber-400 px-2 py-1.5 text-xs text-amber-200 disabled:opacity-50">
+                        {radarAvailable ? "Actualizar GPS" : "Compartir GPS y aparecer"}
+                      </button>
+                      {radarAvailable && (
+                        <button type="button" disabled={loading} onClick={() => handleRadarAvailability(false)}
+                          className="rounded-lg border border-slate-500 px-2 py-1.5 text-xs text-white disabled:opacity-50">
+                          Ocultar del radar
+                        </button>
+                      )}
+                    </section>
                   )}
                   <button
                     type="submit"

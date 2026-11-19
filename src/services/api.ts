@@ -71,6 +71,7 @@ export const api = {
       bio?: string;
       hourlyRate?: number;
       isAvailable?: boolean;
+      location?: { lat: number; lng: number };
     }) {
       const res = await fetch(`${API_BASE}/auth/profile`, {
         method: "PUT",

@@ -2,6 +2,7 @@ import { FormEvent, lazy, Suspense, useEffect, useMemo, useState } from "react";
 import type { RadarPoint } from "./RadarMap";
 import { RadarGrid, RadarServiceCard, type RadarSort, type RadarSpecialist } from "./RadarServices";
 import { api } from "../services/api";
+import { getCurrentLocation } from "../services/geolocation";
 import type { AuthUserSummary } from "./DiclikAccountModal";
 const RadarMap = lazy(() => import("./RadarMap").then(module => ({ default: module.RadarMap })));
 
@@ -30,20 +31,6 @@ const radarRadius = 15;
 
 function approximateCoordinate(value: number): number {
   return Math.round(value * 100) / 100;
-}
-
-function position(): Promise<GPS> {
-  return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) {
-      reject(new Error("El dispositivo no tiene geolocalización disponible."));
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      ({ coords }) => resolve({ lat: coords.latitude, lng: coords.longitude }),
-      ({ message }) => reject(new Error(message || "No fue posible obtener la ubicación.")),
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 10000 },
-    );
-  });
 }
 
 function AmountForm({ label, onSubmit, disabled }: {
@@ -241,7 +228,7 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest }:
         </figcaption>
       </figure>
       <button className={button} disabled={busy} onClick={() => run(async () => {
-        setRadarCenter(await position());
+        setRadarCenter(await getCurrentLocation());
       })}>Buscar cerca de mi ubicación</button>
       <div id="radar-resultados" className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="font-extrabold text-white">Especialistas disponibles</h3>
@@ -272,7 +259,7 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest }:
             await api.services.updateContractStatus(item.id, item.status === "held_in_escrow" ? "active_in_transit" : "in_progress"); await refresh();
           }, "Estado actualizado.")}>{item.status === "held_in_escrow" ? "Iniciar trayecto" : "Marcar llegada"}</button>}
           <button className={button} disabled={busy} onClick={() => run(async () => {
-            await api.services.shareContractLocation(item.id, await position());
+            await api.services.shareContractLocation(item.id, await getCurrentLocation());
           }, "Ubicación compartida con el cliente.")}>Compartir ubicación</button>
           <form className="flex gap-2" onSubmit={event => {
             event.preventDefault();

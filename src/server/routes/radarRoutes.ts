@@ -39,7 +39,7 @@ radarRouter.get("/specialists", async (req: Request, res: Response) => {
              pp.verified, pp.lat, pp.lng, pp.is_available
       FROM users u
       JOIN professional_profiles pp ON u.id = pp.user_id
-      WHERE u.status = 'active' AND pp.is_available = TRUE
+      WHERE u.status = 'active' AND pp.is_available = TRUE AND pp.lat IS NOT NULL AND pp.lng IS NOT NULL
     `;
     const params: any[] = [];
 

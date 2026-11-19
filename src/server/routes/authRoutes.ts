@@ -71,7 +71,7 @@ authRouter.post("/register", async (req: Request, res: Response) => {
       } else {
         await tx.query(
           `INSERT INTO professional_profiles (user_id, trade, credential_code, bio, experience_years, rating, review_count, hourly_rate, verified, lat, lng, radius_km, is_available)
-           VALUES ($1, $2, $3, $4, 1, 5.0, 0, 1500.0, FALSE, 18.4861, -69.9312, 10.0, TRUE);`,
+           VALUES ($1, $2, $3, $4, 1, 5.0, 0, 1500.0, FALSE, NULL, NULL, 10.0, FALSE);`,
           [
             userId,
             trade ? String(trade).trim().slice(0, 64) : "plomeria",
@@ -259,7 +259,14 @@ authRouter.get("/me", requireAuth, async (req: AuthenticatedRequest, res: Respon
 authRouter.put("/profile", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
-    const { fullName, phone, address, trade, bio, hourlyRate, radiusKm, isAvailable } = req.body;
+    const { fullName, phone, address, trade, bio, hourlyRate, radiusKm, isAvailable, location } = req.body;
+    const isSpecialist = user.role === "tecnico" || user.role === "profesional";
+    if (isSpecialist && (location !== undefined || isAvailable === true) &&
+        (!Number.isFinite(location?.lat) || !Number.isFinite(location?.lng) ||
+         Math.abs(location.lat) > 90 || Math.abs(location.lng) > 180)) {
+      res.status(400).json({ error: "Comparte una ubicación GPS válida para aparecer en el radar." });
+      return;
+    }
 
     await db.transaction(async (tx) => {
       if (fullName || phone !== undefined) {
@@ -282,21 +289,25 @@ authRouter.put("/profile", requireAuth, async (req: AuthenticatedRequest, res: R
           "UPDATE client_profiles SET default_address = $1 WHERE user_id = $2;",
           [String(address).trim().slice(0, 300), user.id]
         );
-      } else if (user.role === "tecnico" || user.role === "profesional") {
+      } else if (isSpecialist) {
         await tx.query(
           `UPDATE professional_profiles
            SET trade = COALESCE($1, trade),
                bio = COALESCE($2, bio),
                hourly_rate = COALESCE($3, hourly_rate),
                radius_km = COALESCE($4, radius_km),
-               is_available = COALESCE($5, is_available)
-           WHERE user_id = $6;`,
+               is_available = COALESCE($5, is_available),
+               lat = COALESCE($6, lat),
+               lng = COALESCE($7, lng)
+           WHERE user_id = $8;`,
           [
             trade ? String(trade).trim().slice(0, 64) : null,
             bio !== undefined ? String(bio).trim().slice(0, 1000) : null,
             hourlyRate !== undefined && Number(hourlyRate) > 0 ? Number(hourlyRate) : null,
             radiusKm !== undefined && Number(radiusKm) >= 1 && Number(radiusKm) <= 100 ? Number(radiusKm) : null,
             typeof isAvailable === "boolean" ? isAvailable : null,
+            location?.lat ?? null,
+            location?.lng ?? null,
             user.id
           ]
         );
