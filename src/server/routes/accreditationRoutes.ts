@@ -26,6 +26,46 @@ accreditationRouter.use((_req, res, next) => {
   next();
 });
 
+accreditationRouter.get("/identity", requireAuth, safe(async (req, res) => {
+  const result = await db.query("SELECT submitted_at FROM identity_documents WHERE user_id = $1", [req.user!.id]);
+  res.json({ submitted: result.rows.length > 0 });
+}));
+
+accreditationRouter.put("/identity", requireAuth, safe(async (req, res) => {
+  const { document } = req.body ?? {};
+  if (!validFile(document, 1024 * 1024, true)) {
+    res.status(400).json({ error: "Adjunta una foto legible de tu cédula o identificación en JPG o PNG de hasta 1 MB." });
+    return;
+  }
+  await db.query(
+    `INSERT INTO identity_documents (user_id, mime, document_data) VALUES ($1, $2, $3)
+     ON CONFLICT (user_id) DO UPDATE SET mime = EXCLUDED.mime, document_data = EXCLUDED.document_data, submitted_at = NOW()`,
+    [req.user!.id, document.mime, document.data]
+  );
+  res.status(201).json({ submitted: true });
+}));
+
+accreditationRouter.get("/identity/review", ...reviewerOnly, safe(async (_req, res) => {
+  const result = await db.query(
+    `SELECT d.user_id, u.full_name, u.role, d.submitted_at
+       FROM identity_documents d JOIN users u ON u.id = d.user_id
+       ORDER BY d.submitted_at DESC LIMIT 100`
+  );
+  res.json(result.rows);
+}));
+
+accreditationRouter.get("/identity/review/:userId", ...reviewerOnly, safe(async (req, res) => {
+  const result = await db.query("SELECT mime, document_data FROM identity_documents WHERE user_id = $1", [req.params.userId]);
+  const file = result.rows[0];
+  if (!file) {
+    res.sendStatus(404);
+    return;
+  }
+  res.setHeader("Content-Disposition", `attachment; filename="identificacion.${file.mime === "image/png" ? "png" : "jpg"}"`);
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.type(file.mime).send(Buffer.from(file.document_data, "base64"));
+}));
+
 accreditationRouter.get("/mine", ...specialistOnly, safe(async (req, res) => {
   const result = await db.query(`SELECT ${metadata} FROM specialist_accreditations WHERE user_id = $1`, [req.user!.id]);
   res.json(result.rows[0] ?? null);

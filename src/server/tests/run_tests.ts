@@ -11,6 +11,7 @@ import jwt from "jsonwebtoken";
 import { jsonBody } from "../middleware/jsonBody.ts";
 import { db } from "../db/index.ts";
 import { getJwtSecretForTests } from "../middleware/auth.ts";
+import { accreditationRouter } from "../routes/accreditationRoutes.ts";
 import { authRouter } from "../routes/authRoutes.ts";
 import { marketplaceRouter } from "../routes/marketplaceRoutes.ts";
 import { radarRouter } from "../routes/radarRoutes.ts";
@@ -59,6 +60,7 @@ export async function runAllTests() {
   const app = express();
   app.use(jsonBody);
   app.use("/api/v1/auth", authRouter);
+  app.use("/api/v1/accreditation", accreditationRouter);
   app.use("/api/v1/radar", radarRouter);
   app.use("/api/v1/chat", chatRouter);
   app.use("/api/v1/wallet", walletRouter);
@@ -169,6 +171,47 @@ export async function runAllTests() {
       }
       proToken = regPro.body.token;
       proId = regPro.body.user.id;
+
+      const image = { mime: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aR9sAAAAASUVORK5CYII=" };
+      const technicianHeaders = { Authorization: `Bearer ${proToken}` };
+      const service = { title: "Solicitud desde cuenta de técnico", description: "Prueba de doble rol", address: "Santo Domingo" };
+      const noIdentity = await apiCall("/services", {
+        method: "POST", headers: technicianHeaders, body: JSON.stringify(service),
+      });
+      if (noIdentity.status !== 403 || noIdentity.body.code !== "IDENTITY_REQUIRED") throw new Error("Se publicó sin identificación");
+      for (const token of [clientToken, proToken]) {
+        const upload = await apiCall("/accreditation/identity", {
+          method: "PUT", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ document: image }),
+        });
+        if (upload.status !== 201 || upload.body.submitted !== true) throw new Error("No se pudo subir la identificación");
+      }
+      const otherIdentity = await apiCall(`/accreditation/identity/review/${clientId}`, { headers: technicianHeaders });
+      if (otherIdentity.status !== 403) throw new Error("Se expuso la identificación a una cuenta ajena");
+      const technicianRequest = await apiCall("/services", {
+        method: "POST", headers: technicianHeaders, body: JSON.stringify(service),
+      });
+      if (technicianRequest.status !== 201) throw new Error("El técnico no pudo publicar con su misma cuenta");
+      const ownQuote = await apiCall(`/services/${technicianRequest.body.requestId}/offers`, {
+        method: "POST", headers: technicianHeaders, body: JSON.stringify({ price: 1200 }),
+      });
+      if (ownQuote.status !== 403) throw new Error("El técnico pudo cotizar su propia solicitud");
+      const clientHeaders = { Authorization: `Bearer ${clientToken}` };
+      const customerRequest = await apiCall("/services", {
+        method: "POST", headers: clientHeaders, body: JSON.stringify(service),
+      });
+      const noCredentials = await apiCall(`/services/${customerRequest.body.requestId}/offers`, {
+        method: "POST", headers: technicianHeaders, body: JSON.stringify({ price: 1200 }),
+      });
+      if (noCredentials.status !== 403 || noCredentials.body.code !== "ACCREDITATION_REQUIRED") {
+        throw new Error("Se permitió cotizar sin documentos de acreditación");
+      }
+      await apiCall(`/services/${customerRequest.body.requestId}`, { method: "DELETE", headers: clientHeaders });
+      const credentials = await apiCall("/accreditation/mine", {
+        method: "PUT", headers: technicianHeaders,
+        body: JSON.stringify({ kind: "diploma", photo: image, document: image }),
+      });
+      if (credentials.status !== 201) throw new Error("No se pudo adjuntar el certificado de técnico");
+      await apiCall(`/services/${technicianRequest.body.requestId}`, { method: "DELETE", headers: technicianHeaders });
 
       // Verify bcrypt cost >= 10
       const userRow = (await db.query("SELECT password_hash FROM users WHERE id = $1;", [clientId])).rows[0];

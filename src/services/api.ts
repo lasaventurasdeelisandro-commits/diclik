@@ -13,6 +13,7 @@ export type Accreditation = {
   reason: string | null;
 };
 export type ReviewAccreditation = Accreditation & { user_id: string; full_name: string; role: string };
+export type IdentitySubmission = { user_id: string; full_name: string; role: string; submitted_at: string };
 type UploadFile = { mime: string; data: string };
 
 export function isAdminPage() {
@@ -32,9 +33,26 @@ function getAuthHeader(): Record<string, string> {
 async function handleResponse(res: Response, defaultMsg: string) {
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(json.error || defaultMsg);
+    throw Object.assign(new Error(json.error || defaultMsg), { code: json.code });
   }
   return json;
+}
+
+export function needsAccountDocuments(error: unknown) {
+  return error instanceof Error && "code" in error &&
+    (error.code === "IDENTITY_REQUIRED" || error.code === "ACCREDITATION_REQUIRED");
+}
+
+async function downloadAccreditationFile(res: Response, name: string) {
+  if (!res.ok) throw new Error("No se pudo descargar el archivo.");
+  const blob = await res.blob();
+  const extension = blob.type === "application/pdf" ? "pdf" : blob.type === "image/png" ? "png" : "jpg";
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${name}.${extension}`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
 export const api = {
@@ -419,6 +437,25 @@ export const api = {
   },
 
   accreditation: {
+    async identity(signal?: AbortSignal): Promise<{ submitted: boolean }> {
+      const res = await fetch(`${API_BASE}/accreditation/identity`, { headers: getAuthHeader(), signal });
+      return handleResponse(res, "No se pudo consultar la identificación.");
+    },
+    async submitIdentity(document: UploadFile): Promise<{ submitted: boolean }> {
+      const res = await fetch(`${API_BASE}/accreditation/identity`, {
+        method: "PUT", headers: { "Content-Type": "application/json", ...getAuthHeader() },
+        body: JSON.stringify({ document }),
+      });
+      return handleResponse(res, "No se pudo guardar la identificación.");
+    },
+    async listIdentity(): Promise<IdentitySubmission[]> {
+      const res = await fetch(`${API_BASE}/accreditation/identity/review`, { headers: getAuthHeader() });
+      return handleResponse(res, "No se pudieron cargar las identificaciones.");
+    },
+    async downloadIdentity(userId: string) {
+      const res = await fetch(`${API_BASE}/accreditation/identity/review/${encodeURIComponent(userId)}`, { headers: getAuthHeader() });
+      await downloadAccreditationFile(res, "identificacion");
+    },
     async mine(signal?: AbortSignal): Promise<Accreditation | null> {
       const res = await fetch(`${API_BASE}/accreditation/mine`, { headers: getAuthHeader(), signal });
       return handleResponse(res, "No se pudo consultar la acreditación");
@@ -437,15 +474,7 @@ export const api = {
     },
     async download(userId: string, revision: string, part: "photo" | "document" | "reference-2" | "reference-3") {
       const res = await fetch(`${API_BASE}/accreditation/files/${encodeURIComponent(userId)}/${encodeURIComponent(revision)}/${part}`, { headers: getAuthHeader() });
-      if (!res.ok) throw new Error("No se pudo descargar el archivo.");
-      const blob = await res.blob();
-      const extension = blob.type === "application/pdf" ? "pdf" : blob.type === "image/png" ? "png" : "jpg";
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${part === "photo" ? "foto" : part === "document" ? "documento" : part}.${extension}`;
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      await downloadAccreditationFile(res, part === "photo" ? "foto" : part === "document" ? "documento" : part);
     },
     async review(userId: string, revision: string, decision: "approved" | "rejected", reason: string) {
       const res = await fetch(`${API_BASE}/accreditation/review/${encodeURIComponent(userId)}`, {

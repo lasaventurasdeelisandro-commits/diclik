@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { ServiceLocation, type ServicePoint } from "./ServiceLocation";
 import { DiclikOperations } from "./DiclikOperations";
-import { api } from "../services/api.ts";
+import { api, needsAccountDocuments } from "../services/api.ts";
+import { playPublicationSound, preparePublicationSound } from "../services/publicationSound";
 import { DiclikAccountModal, AuthUserSummary } from "./DiclikAccountModal.tsx";
 import {
   Search,
@@ -1370,6 +1371,7 @@ export function DirectoMobileApp({
   const [publishedRequestId, setPublishedRequestId] = useState("");
   const [publicationMessage, setPublicationMessage] = useState("");
   const publicationPending = useRef(false);
+  const [publishing, setPublishing] = useState(false);
 
   useEffect(() => {
     if (initialRole) {
@@ -1684,18 +1686,16 @@ export function DirectoMobileApp({
         setIsAccountModalOpen(true);
         return;
       }
-      if (authUser.role !== "cliente") {
-        setPublicationMessage("Para publicar una solicitud, cierra la sesión de especialista e inicia sesión con una cuenta de Cliente.");
-        setIsAccountModalOpen(true);
-        return;
-      }
       if (publicationPending.current) return;
       if (!clientAddressInput.trim() || !servicePoint || !servicePointConfirmed) {
         setPublicationMessage("Escribe la dirección y confirma el punto del servicio en el mapa.");
         return;
       }
       publicationPending.current = true;
+      setPublishing(true);
       setPublicationMessage("");
+      setPublishedRequestId("");
+      const sound = preparePublicationSound();
       try {
         const categories = await api.services.getCategories();
         const registeredCategory = categories.find((category: { id: string }) => category.id === detectedTax.id);
@@ -1714,11 +1714,19 @@ export function DirectoMobileApp({
         });
         setPublishedRequestId(result.requestId);
         setCurrentScreen("requests_feed");
-        setPublicationMessage("Solicitud publicada. Aquí podrás revisar las ofertas recibidas.");
+        const searching = detectedTax.targetRole === "profesional" ? "Buscando profesionales." : "Buscando técnicos.";
+        setPublicationMessage(`${searching} Aquí podrás revisar las ofertas recibidas.`);
+        void playPublicationSound(sound).catch(() => {}).then(() => {
+          if (sound) void sound.close().catch(() => {});
+          onSpeak(`Solicitud publicada. ${searching}`);
+        });
       } catch (error) {
+        if (sound) void sound.close().catch(() => {});
+        if (needsAccountDocuments(error)) setIsAccountModalOpen(true);
         setPublicationMessage(error instanceof Error ? error.message : "No se pudo publicar la solicitud.");
       } finally {
         publicationPending.current = false;
+        setPublishing(false);
       }
       return;
     }
@@ -2218,13 +2226,18 @@ export function DirectoMobileApp({
       <div className="flex-1 overflow-y-auto p-3.5 space-y-3.5 relative">
         
         {isDemo && <p role="status" className="rounded-lg bg-amber-950 p-2 text-amber-200 text-xs">Modo de pruebas · negociación, GPS y fondos de demostración</p>}
-        {!isDemo && publicationMessage && <p role="status" className="rounded-lg bg-slate-800 p-2 text-sm">{publicationMessage}</p>}
+        {!isDemo && publicationMessage && (publishedRequestId
+          ? <div role="status" className="rounded-xl border border-emerald-400/40 bg-emerald-950 p-3 text-sm text-emerald-100">
+              <p className="flex items-center gap-2 font-bold"><CheckCircle2 className="size-5" aria-hidden="true" />Solicitud publicada</p>
+              <p className="mt-1">{publicationMessage}</p>
+            </div>
+          : <p role="status" className="rounded-lg bg-slate-800 p-2 text-sm">{publicationMessage}</p>)}
         {!isDemo && (currentScreen !== "home" || !clientPortal) && (
           <div key={`${currentScreen}:${authUser?.id || ""}:${mobileRole}`}>
           <DiclikOperations
             view={currentScreen === "radar" || currentScreen === "profesionales" ? "radar" : currentScreen === "chat" ? "chat" : ["tracking", "otp", "tech_navigation"].includes(currentScreen) ? "contracts" : "requests"}
             user={authUser}
-            role={authUser?.role === "tecnico" || authUser?.role === "profesional" ? authUser.role : mobileRole}
+            role={mobileRole}
             initialRequest={currentScreen === "requests_feed" ? publishedRequestId : undefined}
             onSignIn={() => setIsAccountModalOpen(true)}
             onContractAccepted={() => { setPublicationMessage(""); setCurrentScreen("tracking"); }}
@@ -2515,10 +2528,11 @@ export function DirectoMobileApp({
               {/* PRIMARY CTA BUTTON: SOLICITAR SERVICIO Y ABRIR RADAR DE NEGOCIACIÓN */}
               <button
                 onClick={() => handleClientSearchAndRequest()}
-                className="w-full bg-gradient-to-r from-amber-400 via-amber-500 to-amber-400 hover:from-amber-300 hover:to-amber-300 text-slate-950 font-black text-xs py-3.5 px-4 rounded-2xl flex items-center justify-center space-x-2 transition-all shadow-xl active:scale-95 cursor-pointer mt-2"
+                disabled={publishing}
+                className="w-full disabled:opacity-60 bg-gradient-to-r from-amber-400 via-amber-500 to-amber-400 hover:from-amber-300 hover:to-amber-300 text-slate-950 font-black text-xs py-3.5 px-4 rounded-2xl flex items-center justify-center space-x-2 transition-all shadow-xl active:scale-95 cursor-pointer mt-2"
               >
                 <Radio className="w-4 h-4 text-slate-950 animate-pulse" />
-                <span>{isDemo ? "SOLICITAR SERVICIO Y ABRIR RADAR DE PRECIOS" : "PUBLICAR SOLICITUD"}</span>
+                <span>{isDemo ? "SOLICITAR SERVICIO Y ABRIR RADAR DE PRECIOS" : publishing ? "PUBLICANDO SOLICITUD…" : "PUBLICAR SOLICITUD"}</span>
                 <ArrowRight className="w-4 h-4 text-slate-950" />
               </button>
             </div>

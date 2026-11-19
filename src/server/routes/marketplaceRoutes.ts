@@ -27,6 +27,23 @@ function recordFailedOtpAttempt(contractId: string): void {
   }
 }
 
+async function requireIdentity(req: AuthenticatedRequest, res: Response, next: import("express").NextFunction) {
+  if (req.user!.role === "admin") {
+    next();
+    return;
+  }
+  try {
+    const identity = await db.query("SELECT 1 FROM identity_documents WHERE user_id = $1", [req.user!.id]);
+    if (!identity.rows.length) {
+      res.status(403).json({ code: "IDENTITY_REQUIRED", error: "Sube tu cédula o identificación en Cuenta para continuar." });
+      return;
+    }
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
 // GET /api/v1/categories (Active official categories)
 marketplaceRouter.get("/categories", async (_req: Request, res: Response) => {
   try {
@@ -100,7 +117,7 @@ marketplaceRouter.get("/services", async (req: Request, res: Response) => {
 });
 
 // POST /api/v1/services (Client creates service request)
-marketplaceRouter.post("/services", requireAuth, requireRole("cliente", "admin"), async (req: AuthenticatedRequest, res: Response) => {
+marketplaceRouter.post("/services", requireAuth, requireIdentity, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
     const { title, description, categoryId, targetRole, address, lat, lng, urgency, budgetStrategy, minBudget, photos } = req.body;
@@ -155,8 +172,10 @@ marketplaceRouter.post("/services", requireAuth, requireRole("cliente", "admin")
       );
 
       await tx.query(
-        "UPDATE client_profiles SET total_requests = total_requests + 1 WHERE user_id = $1;",
-        [user.id]
+        `INSERT INTO client_profiles (user_id, default_address, lat, lng, total_requests)
+         VALUES ($1, $2, $3, $4, 1)
+         ON CONFLICT (user_id) DO UPDATE SET total_requests = client_profiles.total_requests + 1;`,
+        [user.id, String(address).trim().slice(0, 300), lat ?? null, lng ?? null]
       );
 
       await tx.query(
@@ -213,7 +232,7 @@ marketplaceRouter.get("/services/:id", async (req: Request, res: Response) => {
 });
 
 // PATCH /api/v1/services/:id (Owner edits open service request)
-marketplaceRouter.patch("/services/:id", requireAuth, requireRole("cliente", "admin"), async (req: AuthenticatedRequest, res: Response) => {
+marketplaceRouter.patch("/services/:id", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
     const { id } = req.params;
@@ -263,7 +282,7 @@ marketplaceRouter.patch("/services/:id", requireAuth, requireRole("cliente", "ad
 });
 
 // DELETE /api/v1/services/:id (Owner cancels open service request before hire)
-marketplaceRouter.delete("/services/:id", requireAuth, requireRole("cliente", "admin"), async (req: AuthenticatedRequest, res: Response) => {
+marketplaceRouter.delete("/services/:id", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
     const { id } = req.params;
@@ -339,7 +358,7 @@ marketplaceRouter.get("/services/:id/offers", async (req: Request, res: Response
 });
 
 // POST /api/v1/services/:id/offers (Pro submits offer on open request)
-marketplaceRouter.post("/services/:id/offers", requireAuth, requireRole("tecnico", "profesional", "admin"), async (req: AuthenticatedRequest, res: Response) => {
+marketplaceRouter.post("/services/:id/offers", requireAuth, requireRole("tecnico", "profesional", "admin"), requireIdentity, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const proUser = req.user!;
     const { id } = req.params;
@@ -358,6 +377,20 @@ marketplaceRouter.post("/services/:id/offers", requireAuth, requireRole("tecnico
     }
 
     const serviceReq = reqQuery.rows[0];
+    if (proUser.id === serviceReq.client_id) {
+      res.status(403).json({ error: "No puedes cotizar tu propia solicitud." });
+      return;
+    }
+    if (proUser.role !== "admin") {
+      const credentials = await db.query(
+        "SELECT 1 FROM specialist_accreditations WHERE user_id = $1 AND status IN ('pending', 'approved')",
+        [proUser.id]
+      );
+      if (!credentials.rows.length) {
+        res.status(403).json({ code: "ACCREDITATION_REQUIRED", error: "Sube tu foto y los documentos de acreditación en Cuenta para cotizar." });
+        return;
+      }
+    }
     if (proUser.role !== "admin" && serviceReq.target_role !== proUser.role) {
       res.status(403).json({ error: "La solicitud corresponde a otro tipo de especialista." });
       return;
@@ -407,7 +440,7 @@ marketplaceRouter.post("/services/:id/offers", requireAuth, requireRole("tecnico
 });
 
 // POST /api/v1/offers/:id/counter (Client or Pro submits formal counter-offer)
-marketplaceRouter.post("/offers/:id/counter", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+marketplaceRouter.post("/offers/:id/counter", requireAuth, requireIdentity, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
     const { id } = req.params;
@@ -514,7 +547,7 @@ marketplaceRouter.post("/offers/:id/reject", requireAuth, async (req: Authentica
 });
 
 // POST /api/v1/offers/:id/accept (Client confirms hire and locks Escrow atomically)
-marketplaceRouter.post("/offers/:id/accept", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+marketplaceRouter.post("/offers/:id/accept", requireAuth, requireIdentity, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const actor = req.user!;
     const { id } = req.params;

@@ -1,8 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, type Accreditation, type ReviewAccreditation } from "../services/api";
+import { api, type Accreditation, type ReviewAccreditation, type IdentitySubmission } from "../services/api";
 
 const kinds: Record<Accreditation["kind"], string> = {
-  titulo: "Título", diploma: "Diploma", carta: "Carta de experiencia laboral", referencias: "Experiencia con referencias",
+  titulo: "Título", diploma: "Certificado o diploma", carta: "Carta de experiencia laboral", referencias: "Experiencia con referencias",
 };
 const statuses = { pending: "En revisión", approved: "Aprobada", rejected: "Rechazada" };
 const button = "rounded-lg border border-amber-400/50 px-3 py-2 text-sm text-amber-200 disabled:opacity-50";
@@ -16,14 +16,14 @@ function encodeFile(file: Blob): Promise<{ mime: string; data: string }> {
   });
 }
 
-async function preparePhoto(file: File) {
+async function preparePhoto(file: File, maxDimension = 480, maxBytes = 180 * 1024) {
   if (!["image/jpeg", "image/png"].includes(file.type) || file.size > 12 * 1024 * 1024) {
     throw new Error("Selecciona una foto JPG o PNG de hasta 12 MB.");
   }
   const image = await createImageBitmap(file);
   try {
     const canvas = document.createElement("canvas");
-    const scale = Math.min(1, 480 / Math.max(image.width, image.height));
+    const scale = Math.min(1, maxDimension / Math.max(image.width, image.height));
     canvas.width = Math.max(1, Math.round(image.width * scale));
     canvas.height = Math.max(1, Math.round(image.height * scale));
     const context = canvas.getContext("2d");
@@ -32,11 +32,56 @@ async function preparePhoto(file: File) {
     context.fillRect(0, 0, canvas.width, canvas.height);
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
     const photo = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, "image/jpeg", 0.78));
-    if (!photo || photo.size > 180 * 1024) throw new Error("Selecciona una foto más pequeña.");
+    if (!photo || photo.size > maxBytes) throw new Error("Selecciona una foto más pequeña.");
     return encodeFile(photo);
   } finally {
     image.close();
   }
+}
+
+export function AccountIdentity() {
+  const [submitted, setSubmitted] = useState(false);
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    api.accreditation.identity(controller.signal).then(result => setSubmitted(result.submitted)).catch(() => {
+      if (!controller.signal.aborted) setMessage("No se pudo consultar la identificación.");
+    });
+    return () => controller.abort();
+  }, []);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const file = new FormData(form).get("identity");
+    if (!(file instanceof File) || !file.size) return;
+    setBusy(true);
+    try {
+      await api.accreditation.submitIdentity(await preparePhoto(file, 1600, 1024 * 1024));
+      setSubmitted(true);
+      setMessage("Identificación recibida.");
+      form.reset();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo enviar la identificación.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <section className="space-y-2 rounded-xl border border-slate-700 p-3 text-xs">
+    <h3 className="text-sm font-bold">Identificación</h3>
+    <p>{submitted ? "Identificación recibida." : "Sube una foto legible de tu cédula o identificación para solicitar, contratar o cotizar un servicio."}</p>
+    <p>Solo Administración puede consultar el documento.</p>
+    <form onSubmit={submit} className="space-y-2">
+      <label className="block">Foto de cédula o identificación
+        <input name="identity" type="file" accept="image/jpeg,image/png" required className="mt-1 block w-full" />
+      </label>
+      <button className={button} disabled={busy}>{submitted ? "Actualizar identificación" : "Enviar identificación"}</button>
+    </form>
+    {message && <p role="status">{message}</p>}
+  </section>;
 }
 
 export function SpecialistAccreditation({ role }: { role: "tecnico" | "profesional" }) {
@@ -100,12 +145,12 @@ export function SpecialistAccreditation({ role }: { role: "tecnico" | "profesion
       <label className="block">Tipo de documento
         <select name="kind" value={kind} onChange={event => setKind(event.target.value as Accreditation["kind"])} className="block mt-1 w-full rounded-lg bg-slate-900 p-2">
           <option value="titulo">Título</option>
-          <option value="diploma">Diploma</option>
+          <option value="diploma">Certificado o diploma</option>
           {role === "tecnico" ? <option value="referencias">{kinds.referencias}</option> : <option value="carta">{kinds.carta}</option>}
         </select>
       </label>
       {kind === "referencias" ? <>
-        <p>Adjunta una carta por cliente. Incluye el trabajo realizado, la fecha y un contacto autorizado de cada cliente.</p>
+        <p>Adjunta una carta por cliente. Incluye el nombre, un teléfono o correo autorizado, el trabajo realizado y la fecha.</p>
         {[1, 2, 3].map(number => <label key={number} className="block">Carta {number} (PDF, JPG o PNG, hasta 400 KB)
           <input name="document" type="file" accept="application/pdf,image/jpeg,image/png" required className="block w-full mt-1" />
         </label>)}
@@ -124,6 +169,7 @@ export function SpecialistAccreditation({ role }: { role: "tecnico" | "profesion
 
 export function AccreditationReview() {
   const [items, setItems] = useState<ReviewAccreditation[]>([]);
+  const [identities, setIdentities] = useState<IdentitySubmission[]>([]);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -134,7 +180,11 @@ export function AccreditationReview() {
     catch (error) { setMessage(error instanceof Error ? error.message : "No se pudo completar la operación."); }
     finally { setBusy(false); }
   }
-  async function refresh() { setItems(await api.accreditation.list()); }
+  async function refresh() {
+    const [accreditations, documents] = await Promise.all([api.accreditation.list(), api.accreditation.listIdentity()]);
+    setItems(accreditations);
+    setIdentities(documents);
+  }
   useEffect(() => { void run(refresh); }, []);
 
   return <section className="space-y-3">
@@ -176,6 +226,11 @@ export function AccreditationReview() {
           <button type="submit" value="rejected" className={button} disabled={busy}>Rechazar</button>
         </div>
       </form>}
+    </article>)}
+    <h2 className="font-bold text-amber-300">Identificaciones recibidas</h2>
+    {identities.map(item => <article key={item.user_id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-700 p-3">
+      <p>{item.full_name} · {item.role}</p>
+      <button className={button} disabled={busy} onClick={() => run(() => api.accreditation.downloadIdentity(item.user_id))}>Descargar identificación</button>
     </article>)}
     {message && <p role="status">{message}</p>}
   </section>;

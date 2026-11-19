@@ -1,4 +1,4 @@
-import { SpecialistAccreditation } from "./Accreditation";
+import { AccountIdentity, SpecialistAccreditation } from "./Accreditation";
 import React, { useEffect, useState } from "react";
 import {
   X,
@@ -177,7 +177,8 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
         address: address.trim()
       });
       onAuthChanged(res.user);
-      setFeedback({ type: "ok", msg: "¡Cuenta creada en Diclik.com!" });
+      setPanelTab("perfil");
+      setFeedback({ type: "ok", msg: "Cuenta creada. Adjunta tu identificación para operar en Diclik." });
       onSpeak(`Cuenta creada exitosamente en Diclik.com`);
     } catch (err: any) {
       setFeedback({ type: "err", msg: err.message });
@@ -631,6 +632,8 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
                   <span>Alertas{unread > 0 ? ` (${unread})` : ""}</span>
                 </button>
               </div>
+
+              {panelTab === "perfil" && <AccountIdentity key={currentUser.id} />}
 
               {panelTab === "perfil" && (
                 <form onSubmit={handleSaveProfile} className="space-y-2.5">

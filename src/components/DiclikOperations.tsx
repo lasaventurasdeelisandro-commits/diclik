@@ -1,7 +1,7 @@
 import { FormEvent, lazy, Suspense, useEffect, useMemo, useState } from "react";
 import type { RadarPoint } from "./RadarMap";
 import { RadarGrid, RadarServiceCard, type RadarSort, type RadarSpecialist } from "./RadarServices";
-import { api } from "../services/api";
+import { needsAccountDocuments, api } from "../services/api";
 import { ContractMap } from "./ContractMap";
 import { getCurrentLocation } from "../services/geolocation";
 import type { AuthUserSummary } from "./DiclikAccountModal";
@@ -9,10 +9,10 @@ const RadarMap = lazy(() => import("./RadarMap").then(module => ({ default: modu
 
 type Role = "cliente" | "tecnico" | "profesional";
 type View = "requests" | "radar" | "contracts" | "chat";
-type RequestRow = { id: string; title: string; description: string; status: string; address?: string; photos?: string[] };
+type RequestRow = { id: string; client_id?: string; title: string; description: string; status: string; address?: string; photos?: string[] };
 type Offer = { id: string; pro_name: string; professional_id: string; price: number; counter_price?: number; counter_proposed_by?: string; message: string; status: string };
 type Contract = { completed_at?: string; pro_name?: string; agreed_price: number; commission_rate: number; platform_fee: number; professional_payout: number; id: string; request_title: string; status: string; address: string; otp_code?: string; professional_id: string; client_id: string };
-type Conversation = { id: string; request_title: string; client_name: string; pro_name: string };
+type Conversation = { id: string; client_id: string; request_title: string; client_name: string; pro_name: string };
 type Message = { id: string; sender_name: string; content: string };
 type GPS = { lat: number; lng: number; updated_at?: string };
 
@@ -87,8 +87,9 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
 
   const [adminUsers, setAdminUsers] = useState<{ id: string; email: string; role: string; status: string }[]>([]);
   const [disputes, setDisputes] = useState<{ id: string; reason: string; status: string }[]>([]);
-  const isClient = user?.role === "cliente";
+  const isClient = role === "cliente";
   const isAdmin = user?.role === "admin";
+  const canQuote = !isClient && user?.role === role;
 
   async function refresh() {
     if (isAdmin && view === "requests") {
@@ -96,7 +97,7 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
       setAdminUsers(Array.isArray(users) ? users : users.users || []);
       setDisputes(Array.isArray(claims) ? claims : []);
     } else if (view === "requests") {
-      const rows: RequestRow[] = await api.services.list(isClient && user ? { clientId: user.id } : { targetRole: role });
+      const rows: RequestRow[] = await api.services.list(isClient ? (user ? { clientId: user.id } : undefined) : { targetRole: role });
       setRequests(isClient ? rows : rows.filter(row => ["open", "negotiating"].includes(row.status)));
       if (selection && user) setOffers(await api.services.getOffers(selection));
     } else if (view === "contracts" && user) {
@@ -135,6 +136,7 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
       await task();
       if (success) setNotice(success);
     } catch (error) {
+      if (needsAccountDocuments(error)) onSignIn();
       setNotice(error instanceof Error ? error.message : "No se pudo completar la operación.");
     } finally {
       setBusy(false);
@@ -175,7 +177,7 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
           {row.photos?.filter(url => /^(https:\/\/|data:image\/(jpeg|png|webp|gif);base64,)/.test(url)).map((url, index) =>
             <img key={index} src={url} alt={`Foto de la solicitud ${index + 1}`} className="max-h-32 rounded-lg object-contain" />
           )}
-          {offers.filter(offer => isClient || offer.professional_id === user?.id).map(offer => <div key={offer.id} className={card}>
+          {offers.filter(offer => (isClient && row.client_id === user?.id) || offer.professional_id === user?.id).map(offer => <div key={offer.id} className={card}>
             <p>{offer.pro_name} · RD$ {offer.counter_price || offer.price} · {statusLabel[offer.status] || offer.status}</p>
             <p>{offer.message}</p>
             {["pending", "countered"].includes(offer.status) && <>
@@ -191,10 +193,10 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
               }, "Oferta rechazada.")}>Rechazar</button>
             </>}
           </div>)}
-          {user && !isClient && <AmountForm label="Enviar cotización" disabled={busy} onSubmit={amount => run(async () => {
+          {canQuote && row.client_id !== user?.id && <AmountForm label="Enviar cotización" disabled={busy} onSubmit={amount => run(async () => {
             await api.services.submitOffer(row.id, amount, 15); await refresh();
           }, "Cotización enviada.")} />}
-          {isClient && ["open", "negotiating"].includes(row.status) && <button className={button} disabled={busy} onClick={() => run(async () => {
+          {isClient && user && row.client_id === user.id && ["open", "negotiating"].includes(row.status) && <button className={button} disabled={busy} onClick={() => run(async () => {
             await api.services.remove(row.id); await refresh();
           }, "Solicitud cancelada.")}>Cancelar solicitud</button>}
         </>}
@@ -296,7 +298,7 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
     {view === "chat" && <>
       <h2 className="font-bold text-indigo-300">Chat</h2>
       {user && !conversations.length && <p>Las conversaciones aparecen al contratar un servicio.</p>}
-      {conversations.map(item => <button className={button} key={item.id} onClick={() => { setMessages([]); setSelection(item.id); }}>{item.request_title} · {isClient ? item.pro_name : item.client_name}</button>)}
+      {conversations.map(item => <button className={button} key={item.id} onClick={() => { setMessages([]); setSelection(item.id); }}>{item.request_title} · {item.client_id === user?.id ? item.pro_name : item.client_name}</button>)}
       {selection && <>
         {messages.map(item => <div className={card} key={item.id}><strong>{item.sender_name}</strong><p>{item.content}</p></div>)}
         <form className="flex gap-2" onSubmit={event => {
