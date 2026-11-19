@@ -970,11 +970,30 @@ export async function runAllTests() {
         body: JSON.stringify({ revision: accreditation.body.revision, decision: "approved" }),
       });
       if (approved.status !== 200) throw new Error("No se pudo acreditar al técnico de prueba.");
+      const requestPromotion = (headers: Record<string, string>, category: string) => apiCall("/accreditation/sponsorship", {
+        method: "POST", headers, body: JSON.stringify({ category }),
+      });
+      if ((await requestPromotion(client, "tecnico")).status !== 403 ||
+          (await requestPromotion(specialist, "pediatria")).status !== 403 ||
+          (await requestPromotion(specialist, "tecnico")).status !== 200 ||
+          (await requestPromotion(specialist, "tecnico")).status !== 200) {
+        throw new Error("No se respetaron los permisos para solicitar la promoción.");
+      }
+      const pending = await apiCall("/admin/sponsored", { headers: admin });
+      if (pending.body.requests.filter((item: any) => item.user_id === proId && item.category === "tecnico").length !== 1) {
+        throw new Error("La solicitud no llegó una sola vez a Administración.");
+      }
       const sponsor = { userId: proId, category: "tecnico", expiresAt: new Date(Date.now() + 3600_000).toISOString(), reference: "PAGO-QA" };
       const publish = (headers: Record<string, string>, data = sponsor) =>
         apiCall("/admin/sponsored", { method: "PUT", headers, body: JSON.stringify(data) });
       if ((await publish(client)).status !== 403 || (await publish(admin, { ...sponsor, category: "pediatria" })).status !== 400 ||
           (await publish(admin)).status !== 200) throw new Error("Falló la autorización o la elegibilidad del patrocinio.");
+      const promotion = await apiCall("/accreditation/sponsorship", { headers: specialist });
+      if (promotion.status !== 200 || promotion.body.requested.includes("tecnico") ||
+          !promotion.body.active.some((item: any) => item.category === "tecnico") ||
+          (await requestPromotion(specialist, "tecnico")).status !== 409) {
+        throw new Error("El especialista no vio el vencimiento o pudo duplicar una promoción activa.");
+      }
       const directory = await apiCall("/radar/sponsored?category=tecnico");
       if (!directory.body.some((item: any) => item.id === proId && !("payment_reference" in item))) {
         throw new Error("No apareció el perfil o se expuso la referencia de pago.");

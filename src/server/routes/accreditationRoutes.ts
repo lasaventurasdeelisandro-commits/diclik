@@ -1,3 +1,4 @@
+import { eligibleQuickAccessCategories, isQuickAccessCategory } from "../../quickAccess.ts";
 import { Router, Response, RequestHandler } from "express";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.ts";
@@ -25,6 +26,49 @@ accreditationRouter.use((_req, res, next) => {
   res.setHeader("Cache-Control", "private, no-store");
   next();
 });
+
+accreditationRouter.get("/sponsorship", ...specialistOnly, safe(async (req, res) => {
+  const userId = req.user!.id;
+  const [profile, requests, listings] = await Promise.all([
+    db.query("SELECT verified, trade FROM professional_profiles WHERE user_id = $1", [userId]),
+    db.query("SELECT category FROM sponsor_requests WHERE user_id = $1 ORDER BY submitted_at", [userId]),
+    db.query("SELECT category, expires_at FROM active_sponsored_specialists WHERE user_id = $1 ORDER BY expires_at", [userId]),
+  ]);
+  const specialist = profile.rows[0];
+  res.json({
+    verified: Boolean(specialist?.verified),
+    eligibleCategories: eligibleQuickAccessCategories(req.user!.role, specialist?.trade ?? ""),
+    requested: requests.rows.map(item => item.category),
+    active: listings.rows,
+  });
+}));
+
+accreditationRouter.post("/sponsorship", ...specialistOnly, safe(async (req, res) => {
+  const { category } = req.body ?? {};
+  if (!isQuickAccessCategory(category)) {
+    res.status(400).json({ error: "Selecciona una categoría válida." });
+    return;
+  }
+  const user = req.user!;
+  const outcome = await db.transaction(async tx => {
+    const profile = await tx.query("SELECT verified, trade FROM professional_profiles WHERE user_id = $1 FOR UPDATE", [user.id]);
+    const specialist = profile.rows[0];
+    if (!specialist?.verified || !eligibleQuickAccessCategories(user.role, specialist.trade).includes(category)) return "ineligible";
+    const active = await tx.query("SELECT 1 FROM active_sponsored_specialists WHERE user_id = $1 AND category = $2", [user.id, category]);
+    if (active.rows.length) return "active";
+    await tx.query("INSERT INTO sponsor_requests (user_id, category) VALUES ($1, $2) ON CONFLICT DO NOTHING", [user.id, category]);
+    return "requested";
+  });
+  if (outcome === "ineligible") {
+    res.status(403).json({ error: "Tu perfil debe estar acreditado en la categoría elegida." });
+    return;
+  }
+  if (outcome === "active") {
+    res.status(409).json({ error: "Ya tienes una publicación activa en esa categoría." });
+    return;
+  }
+  res.json({ requested: true });
+}));
 
 accreditationRouter.get("/identity", requireAuth, safe(async (req, res) => {
   const result = await db.query("SELECT submitted_at FROM identity_documents WHERE user_id = $1", [req.user!.id]);

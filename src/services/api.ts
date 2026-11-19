@@ -17,7 +17,14 @@ export type ReviewAccreditation = Accreditation & { user_id: string; full_name: 
 export type SponsoredProfile = { id: string; name: string; avatar?: string; trade: string; rating: number; reviewCount: number };
 export type SponsoredAdministration = {
   profiles: { id: string; full_name: string; role: string; trade: string }[];
+  requests: { user_id: string; full_name: string; category: QuickAccessCategory; submitted_at: string }[];
   listings: { user_id: string; full_name: string; category: QuickAccessCategory; expires_at: string; payment_reference: string }[];
+};
+export type PremiumPublication = {
+  verified: boolean;
+  eligibleCategories: QuickAccessCategory[];
+  requested: QuickAccessCategory[];
+  active: { category: QuickAccessCategory; expires_at: string }[];
 };
 export type IdentitySubmission = { user_id: string; full_name: string; role: string; submitted_at: string };
 type UploadFile = { mime: string; data: string };
@@ -457,6 +464,17 @@ export const api = {
   },
 
   accreditation: {
+    async sponsorship(signal?: AbortSignal): Promise<PremiumPublication> {
+      const res = await fetch(`${API_BASE}/accreditation/sponsorship`, { headers: getAuthHeader(), signal });
+      return handleResponse(res, "No se pudo consultar la promoción.");
+    },
+    async requestSponsorship(category: QuickAccessCategory) {
+      const res = await fetch(`${API_BASE}/accreditation/sponsorship`, {
+        method: "POST", headers: { "Content-Type": "application/json", ...getAuthHeader() },
+        body: JSON.stringify({ category }),
+      });
+      return handleResponse(res, "No se pudo solicitar la promoción.");
+    },
     async identity(signal?: AbortSignal): Promise<{ submitted: boolean }> {
       const res = await fetch(`${API_BASE}/accreditation/identity`, { headers: getAuthHeader(), signal });
       return handleResponse(res, "No se pudo consultar la identificación.");

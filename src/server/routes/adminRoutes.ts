@@ -12,14 +12,16 @@ adminRouter.use(requireAuth, requireRole("admin"));
 
 adminRouter.get("/sponsored", async (_req, res) => {
   try {
-    const [profiles, listings] = await Promise.all([
+    const [profiles, listings, requests] = await Promise.all([
       db.query(`SELECT u.id, u.full_name, u.role, p.trade FROM users u
                 JOIN professional_profiles p ON p.user_id = u.id
                 WHERE u.status = 'active' AND p.verified ORDER BY u.full_name, u.id;`),
       db.query(`SELECT s.user_id, s.category, s.expires_at, s.payment_reference, u.full_name
                 FROM sponsored_specialists s JOIN users u ON u.id = s.user_id ORDER BY s.expires_at DESC;`),
+      db.query(`SELECT s.user_id, s.category, s.submitted_at, u.full_name
+                FROM sponsor_requests s JOIN users u ON u.id = s.user_id ORDER BY s.submitted_at;`),
     ]);
-    res.json({ profiles: profiles.rows, listings: listings.rows });
+    res.json({ profiles: profiles.rows, listings: listings.rows, requests: requests.rows });
   } catch {
     res.status(500).json({ error: "No se pudieron consultar las publicaciones patrocinadas." });
   }
@@ -34,17 +36,24 @@ adminRouter.put("/sponsored", async (req: AuthenticatedRequest, res: Response) =
     return;
   }
   try {
-    const result = await db.query(
-      `INSERT INTO sponsored_specialists (user_id, category, expires_at, payment_reference)
-       SELECT u.id, $2::varchar, $3, $4 FROM users u JOIN professional_profiles p ON p.user_id = u.id
-       WHERE u.id = $1 AND u.status = 'active' AND u.role = $5 AND p.verified
-         AND ($2::varchar <> 'pediatria' OR LOWER(p.trade) LIKE '%pediatr%')
-         AND ($2::varchar <> 'plomeria' OR LOWER(p.trade) LIKE '%plomer%')
-       ON CONFLICT (user_id, category) DO UPDATE
-       SET expires_at = EXCLUDED.expires_at, payment_reference = EXCLUDED.payment_reference
-       RETURNING user_id;`,
-      [userId, category, new Date(expiry).toISOString(), reference.trim(), quickAccess[category].role],
-    );
+    const result = await db.transaction(async tx => {
+      await tx.query("SELECT user_id FROM professional_profiles WHERE user_id = $1 FOR UPDATE", [userId]);
+      const published = await tx.query(
+        `INSERT INTO sponsored_specialists (user_id, category, expires_at, payment_reference)
+         SELECT u.id, $2::varchar, $3, $4 FROM users u JOIN professional_profiles p ON p.user_id = u.id
+         WHERE u.id = $1 AND u.status = 'active' AND u.role = $5 AND p.verified
+           AND ($2::varchar <> 'pediatria' OR LOWER(p.trade) LIKE '%pediatr%')
+           AND ($2::varchar <> 'plomeria' OR LOWER(p.trade) LIKE '%plomer%')
+         ON CONFLICT (user_id, category) DO UPDATE
+         SET expires_at = EXCLUDED.expires_at, payment_reference = EXCLUDED.payment_reference
+         RETURNING user_id;`,
+        [userId, category, new Date(expiry).toISOString(), reference.trim(), quickAccess[category].role],
+      );
+      if (published.rows.length) {
+        await tx.query("DELETE FROM sponsor_requests WHERE user_id = $1 AND category = $2", [userId, category]);
+      }
+      return published;
+    });
     if (!result.rows.length) {
       res.status(400).json({ error: "El perfil debe estar activo, acreditado y corresponder a la categoría elegida." });
       return;

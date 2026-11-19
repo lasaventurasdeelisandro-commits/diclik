@@ -1,13 +1,23 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { isQuickAccessCategory, quickAccess } from "../quickAccess";
+import { isQuickAccessCategory, premiumPublicationDays, quickAccess, type QuickAccessCategory } from "../quickAccess";
 import { api, type SponsoredAdministration as SponsoredData } from "../services/api";
 
 const field = "block min-h-10 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2";
 const button = "rounded-lg border border-amber-400/50 px-3 py-2 font-bold text-amber-200 disabled:opacity-50";
 
+function defaultExpiry() {
+  const expiry = new Date();
+  expiry.setDate(expiry.getDate() + premiumPublicationDays);
+  return new Date(expiry.getTime() - expiry.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+}
+
 export function SponsoredAdministration() {
   const [data, setData] = useState<SponsoredData | null>(null);
   const [busy, setBusy] = useState(false);
+  const [userId, setUserId] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<QuickAccessCategory>("plomeria");
+  const [expiryInput, setExpiryInput] = useState(defaultExpiry);
+
   const [message, setMessage] = useState("");
   useEffect(() => {
     api.admin.listSponsored().then(setData).catch(() => setMessage("No se pudo cargar la lista patrocinada."));
@@ -39,26 +49,42 @@ export function SponsoredAdministration() {
         userId: String(fields.get("userId")), category, expiresAt: expiry.toISOString(), reference: String(fields.get("reference")),
       });
       form.reset();
+      setUserId("");
+      setExpiryInput(defaultExpiry());
     }, "Perfil publicado en Acceso rápido.");
   }
 
   return <section className="space-y-4">
     <h2 className="text-lg font-bold text-amber-300">Acceso rápido patrocinado</h2>
     <p className="text-sm text-slate-300">Registra un perfil después de confirmar el pago recibido fuera de Diclik. La publicación se retira automáticamente al vencer.</p>
+    {data && <div className="space-y-2">
+      <h3 className="font-bold text-amber-200">Solicitudes Premium pendientes</h3>
+      {!data.requests.length && <p className="text-sm text-slate-300">No hay solicitudes pendientes.</p>}
+      {data.requests.map(item => <article key={`${item.user_id}:${item.category}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-700 p-3">
+        <p>{item.full_name} · {quickAccess[item.category].label}</p>
+        <button type="button" className={button} onClick={() => {
+          setUserId(item.user_id);
+          setSelectedCategory(item.category);
+          setExpiryInput(defaultExpiry());
+        }}>Preparar publicación</button>
+      </article>)}
+    </div>}
     {data && <form onSubmit={submit} className="grid gap-3 rounded-xl border border-slate-700 bg-slate-900 p-4 sm:grid-cols-2">
       <label>Especialista acreditado
-        <select name="userId" required className={field}>
+        <select name="userId" value={userId} onChange={event => setUserId(event.target.value)} required className={field}>
           <option value="">Selecciona un especialista</option>
           {data.profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.full_name} · {profile.trade}</option>)}
         </select>
       </label>
       <label>Categoría
-        <select name="category" required className={field}>
+        <select name="category" value={selectedCategory} onChange={event => {
+          if (isQuickAccessCategory(event.target.value)) setSelectedCategory(event.target.value);
+        }} required className={field}>
           {Object.entries(quickAccess).map(([id, item]) => <option key={id} value={id}>{item.label}</option>)}
         </select>
       </label>
       <label>Vence el
-        <input name="expiry" type="datetime-local" required className={field} />
+        <input name="expiry" type="datetime-local" value={expiryInput} onChange={event => setExpiryInput(event.target.value)} required className={field} />
       </label>
       <label>Referencia del pago recibido
         <input name="reference" required maxLength={120} className={field} />
