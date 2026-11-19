@@ -1,0 +1,6 @@
+{
+  "name": "Directo",
+  "description": "Plataforma marketplace de contratación directa y negociación en tiempo real para servicios del hogar, emergencias y profesionales con seguimiento GPS y pagos Escrow.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
