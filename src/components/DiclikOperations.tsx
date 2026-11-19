@@ -2,6 +2,7 @@ import { FormEvent, lazy, Suspense, useEffect, useMemo, useState } from "react";
 import type { RadarPoint } from "./RadarMap";
 import { RadarGrid, RadarServiceCard, type RadarSort, type RadarSpecialist } from "./RadarServices";
 import { api } from "../services/api";
+import { ContractMap } from "./ContractMap";
 import { getCurrentLocation } from "../services/geolocation";
 import type { AuthUserSummary } from "./DiclikAccountModal";
 const RadarMap = lazy(() => import("./RadarMap").then(module => ({ default: module.RadarMap })));
@@ -47,8 +48,8 @@ function AmountForm({ label, onSubmit, disabled }: {
   </form>;
 }
 
-export function DiclikOperations({ view, user, role, onSignIn, initialRequest }: {
-  view: View; user: AuthUserSummary | null; role: Role; onSignIn: () => void; initialRequest?: string;
+export function DiclikOperations({ view, user, role, onSignIn, initialRequest, onContractAccepted }: {
+  view: View; user: AuthUserSummary | null; role: Role; onSignIn: () => void; initialRequest?: string; onContractAccepted: () => void;
 }) {
   const [requests, setRequests] = useState<RequestRow[]>([]);
   const [offers, setOffers] = useState<Offer[]>([]);
@@ -57,7 +58,6 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest }:
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [specialists, setSpecialists] = useState<RadarSpecialist[]>([]);
-  const [gps, setGps] = useState<Record<string, GPS | null>>({});
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -182,7 +182,8 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest }:
                 await api.services.counterOffer(offer.id, amount); await refresh();
               }, "Contraoferta enviada. Si la otra parte acepta, se formalizará el contrato.")} />
               {(isClient ? offer.counter_proposed_by !== user?.id : Boolean(offer.counter_proposed_by && offer.counter_proposed_by !== user?.id)) && <button className={button} disabled={busy} onClick={() => run(async () => {
-                await api.services.acceptOffer(offer.id); await refresh();
+                await api.services.acceptOffer(offer.id);
+                onContractAccepted();
               }, "Contratación confirmada.")}>Contratar</button>}
               <button className={button} disabled={busy} onClick={() => run(async () => {
                 await api.services.rejectOffer(offer.id); await refresh();
@@ -253,14 +254,13 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest }:
         <h3 className="font-bold">{item.request_title}</h3>
         <p>{statusLabel[item.status] || item.status}</p>
         {item.otp_code && active.includes(item.status) && <p>Código OTP: <strong>{item.otp_code}</strong></p>}
+        {user && active.includes(item.status) && (item.client_id === user.id || item.professional_id === user.id) && (
+          <ContractMap contractId={item.id} isClient={item.client_id === user.id} address={item.address} />
+        )}
         {item.professional_id === user?.id && active.includes(item.status) && <>
-          {item.address && <a className={button} target="_blank" rel="noreferrer" href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(item.address)}`}>Abrir ruta</a>}
           {item.status !== "in_progress" && <button className={button} disabled={busy} onClick={() => run(async () => {
             await api.services.updateContractStatus(item.id, item.status === "held_in_escrow" ? "active_in_transit" : "in_progress"); await refresh();
           }, "Estado actualizado.")}>{item.status === "held_in_escrow" ? "Iniciar trayecto" : "Marcar llegada"}</button>}
-          <button className={button} disabled={busy} onClick={() => run(async () => {
-            await api.services.shareContractLocation(item.id, await getCurrentLocation());
-          }, "Ubicación compartida con el cliente.")}>Compartir ubicación</button>
           <form className="flex gap-2" onSubmit={event => {
             event.preventDefault();
             const data = new FormData(event.currentTarget);
@@ -269,13 +269,6 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest }:
             <input className={input} aria-label="Código OTP del cliente" name="otp" pattern="[0-9]{4}" maxLength={4} inputMode="numeric" required />
             <button className={button} disabled={busy}>Validar OTP</button>
           </form>
-        </>}
-        {item.client_id === user?.id && active.includes(item.status) && <>
-          <button className={button} disabled={busy} onClick={() => run(async () => {
-            const location = await api.services.getContractLocation(item.id);
-            setGps(old => ({ ...old, [item.id]: location }));
-          })}>Actualizar GPS</button>
-          {gps[item.id] ? <a className={button} target="_blank" rel="noreferrer" href={`https://www.google.com/maps/search/?api=1&query=${gps[item.id]?.lat},${gps[item.id]?.lng}`}>Ver ubicación compartida</a> : gps[item.id] === null && <p>El especialista aún no ha compartido su ubicación.</p>}
         </>}
       </article>)}
     </>}

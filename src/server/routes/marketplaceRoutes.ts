@@ -770,11 +770,37 @@ marketplaceRouter.put("/contracts/:id/location", requireAuth, async (req: Authen
   }
 });
 
+marketplaceRouter.put("/contracts/:id/destination", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const { lat, lng } = req.body;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    res.status(400).json({ error: "Coordenadas inválidas." });
+    return;
+  }
+  try {
+    const result = await db.query(
+      `INSERT INTO contract_destinations (contract_id, lat, lng)
+       SELECT id, $2, $3 FROM contracts
+       WHERE id = $1 AND client_id = $4 AND status IN ('held_in_escrow', 'active_in_transit', 'in_progress')
+       ON CONFLICT (contract_id) DO UPDATE SET lat = EXCLUDED.lat, lng = EXCLUDED.lng
+       RETURNING contract_id;`,
+      [req.params.id, lat, lng, req.user!.id],
+    );
+    if (!result.rows.length) {
+      res.status(403).json({ error: "Solo el cliente del contrato activo puede fijar el punto del servicio." });
+      return;
+    }
+    res.json({ lat, lng });
+  } catch {
+    res.status(500).json({ error: "No se pudo guardar el punto del servicio." });
+  }
+});
+
 marketplaceRouter.get("/contracts/:id/location", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const result = await db.query(
-      `SELECT l.lat, l.lng, l.updated_at FROM contracts c
+      `SELECT l.lat, l.lng, l.updated_at, d.lat AS destination_lat, d.lng AS destination_lng FROM contracts c
        LEFT JOIN contract_locations l ON l.contract_id = c.id
+       LEFT JOIN contract_destinations d ON d.contract_id = c.id
        WHERE c.id = $1 AND (c.client_id = $2 OR c.professional_id = $2)
        AND c.status IN ('held_in_escrow', 'active_in_transit', 'in_progress');`,
       [req.params.id, req.user!.id],
@@ -784,7 +810,16 @@ marketplaceRouter.get("/contracts/:id/location", requireAuth, async (req: Authen
       return;
     }
     res.setHeader("Cache-Control", "no-store");
-    res.json(result.rows[0].updated_at ? result.rows[0] : null);
+    const { lat, lng, updated_at, destination_lat, destination_lng } = result.rows[0];
+    const specialist = updated_at ? { lat, lng, updated_at } : null;
+    if (req.query.view === "map") {
+      res.json({
+        specialist,
+        destination: destination_lat == null || destination_lng == null ? null : { lat: destination_lat, lng: destination_lng },
+      });
+      return;
+    }
+    res.json(specialist);
   } catch {
     res.status(500).json({ error: "No se pudo consultar la ubicación." });
   }

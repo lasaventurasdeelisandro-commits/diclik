@@ -9,11 +9,13 @@ export interface RadarPoint {
   lng: number;
 }
 
-export function RadarMap({ center, points, selected, onSelect }: {
+export function RadarMap({ center, points, selected, onSelect, connect = false, label = "Mapa de servicios cercanos" }: {
   center: { lat: number; lng: number };
   points: RadarPoint[];
   selected: string | null;
   onSelect: (id: string) => void;
+  connect?: boolean;
+  label?: string;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
@@ -44,15 +46,20 @@ export function RadarMap({ center, points, selected, onSelect }: {
       return;
     }
     instance.fitBounds(L.latLngBounds([location, ...points.map(point => L.latLng(point.lat, point.lng))]), {
-      maxZoom: 13,
+      maxZoom: connect ? 16 : 13,
       padding: [24, 24],
     });
-  }, [center.lat, center.lng, points]);
+  }, [center.lat, center.lng, points, connect]);
 
   useEffect(() => {
     const layer = markers.current;
     if (!layer) return;
     layer.clearLayers();
+    if (connect && points.length === 2) {
+      L.polyline(points.map(point => [point.lat, point.lng]), {
+        color: "#2563eb", weight: 5, dashArray: "8 8",
+      }).addTo(layer);
+    }
     points.forEach((point, index) => {
       const active = point.id === selected;
       const icon = L.divIcon({
@@ -64,7 +71,7 @@ export function RadarMap({ center, points, selected, onSelect }: {
         .on("click", () => onSelect(point.id))
         .addTo(layer);
     });
-  }, [points, selected, onSelect]);
+  }, [points, selected, onSelect, connect]);
 
-  return <div ref={container} aria-label="Mapa de servicios cercanos" className="relative z-0 h-64 w-full rounded-xl border border-slate-700" />;
+  return <div ref={container} aria-label={label} className="relative z-0 h-64 w-full rounded-xl border border-slate-700" />;
 }

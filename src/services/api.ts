@@ -245,11 +245,23 @@ export const api = {
       return handleResponse(res, "Error al compartir ubicación");
     },
 
-    async getContractLocation(contractId: string) {
-      const res = await fetch(`${API_BASE}/contracts/${contractId}/location`, {
-        headers: { ...getAuthHeader() }
+    async shareContractDestination(contractId: string, location: { lat: number; lng: number }) {
+      const res = await fetch(`${API_BASE}/contracts/${contractId}/destination`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...getAuthHeader() },
+        body: JSON.stringify(location)
       });
-      return handleResponse(res, "Error al consultar ubicación");
+      return handleResponse(res, "Error al guardar el punto del servicio");
+    },
+
+    async getContractMap(contractId: string, signal?: AbortSignal): Promise<{
+      specialist: { lat: number; lng: number; updated_at: string } | null;
+      destination: { lat: number; lng: number } | null;
+    }> {
+      const res = await fetch(`${API_BASE}/contracts/${contractId}/location?view=map`, {
+        headers: { ...getAuthHeader() }, signal
+      });
+      return handleResponse(res, "Error al consultar el mapa del contrato");
     },
 
     async verifyOtp(contractId: string, otpInput: string) {

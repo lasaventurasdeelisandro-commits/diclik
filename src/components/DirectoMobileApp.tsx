@@ -2204,6 +2204,7 @@ export function DirectoMobileApp({
             role={authUser?.role === "tecnico" || authUser?.role === "profesional" ? authUser.role : mobileRole}
             initialRequest={currentScreen === "requests_feed" ? publishedRequestId : undefined}
             onSignIn={() => setIsAccountModalOpen(true)}
+            onContractAccepted={() => { setPublicationMessage(""); setCurrentScreen("tracking"); }}
           />
           </div>
         )}

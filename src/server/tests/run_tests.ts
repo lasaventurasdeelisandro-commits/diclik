@@ -402,6 +402,23 @@ export async function runAllTests() {
       }
       const externalAccess = await apiCall(locationPath, { headers: { Authorization: `Bearer ${adminToken}` } });
       if (externalAccess.status !== 403) throw new Error("Se expuso la ubicación fuera del contrato");
+      const destinationPath = `/contracts/${contractId}/destination`;
+      const destination = { lat: 18.49, lng: -69.92 };
+      const destinationWrite = { method: "PUT", body: JSON.stringify(destination) };
+      const deniedDestination = await apiCall(destinationPath, { ...destinationWrite, headers: proHeaders });
+      if (deniedDestination.status !== 403) throw new Error("El técnico pudo cambiar el destino del cliente");
+      const savedDestination = await apiCall(destinationPath, { ...destinationWrite, headers: clientHeaders });
+      if (savedDestination.status !== 200) throw new Error("El cliente no pudo fijar el destino");
+      const mapPath = `${locationPath}?view=map`;
+      for (const headers of [clientHeaders, proHeaders]) {
+        const map = await apiCall(mapPath, { headers });
+        if (map.status !== 200 || map.body.destination?.lat !== destination.lat ||
+            map.body.destination?.lng !== destination.lng || map.body.specialist?.lat !== location.lat) {
+          throw new Error("Los participantes no pudieron ver ambos puntos del contrato");
+        }
+      }
+      const deniedMap = await apiCall(mapPath, { headers: { Authorization: `Bearer ${adminToken}` } });
+      if (deniedMap.status !== 403) throw new Error("El mapa expuso el destino a terceros");
       const transit = await apiCall(`/contracts/${contractId}/status`, {
         method: "PATCH", headers: proHeaders, body: JSON.stringify({ status: "active_in_transit" }),
       });
