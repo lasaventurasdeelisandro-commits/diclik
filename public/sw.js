@@ -1,23 +1,18 @@
-// Service Worker for Diclik.com PWA
-const CACHE_NAME = 'diclik-pwa-v1';
-
-self.addEventListener('install', (event) => {
-  self.skipWaiting();
+// Revalidate the entry document when the installed web app opens.
+// Hashed assets can use the browser cache and API calls bypass this worker.
+self.addEventListener("install", event => {
+  event.waitUntil(self.skipWaiting());
 });
 
-self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    ).then(() => self.clients.claim())
-  );
+self.addEventListener("activate", event => {
+  event.waitUntil(self.clients.claim());
 });
 
-self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
-  // Never cache authenticated or dynamic API requests
-  if (url.pathname.startsWith('/api/') || event.request.method !== 'GET') {
-    return;
-  }
-  event.respondWith(fetch(event.request).catch(() => caches.match(event.request)));
+self.addEventListener("fetch", event => {
+  const request = event.request;
+  const url = new URL(request.url);
+  if (request.method !== "GET" || request.mode !== "navigate" ||
+      url.origin !== self.location.origin || url.pathname !== "/") return;
+
+  event.respondWith(fetch(request, { cache: "no-cache" }));
 });

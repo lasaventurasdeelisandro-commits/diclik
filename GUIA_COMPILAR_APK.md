@@ -68,3 +68,18 @@ cd android
 
 **Ubicación del AAB para Google Play Console:**
 `android/app/build/outputs/bundle/release/app-release.aab`
+
+## 4. Actualizaciones desde Google Play
+
+La primera instalación se hace desde Google Play. El APK de pruebas ya instalado usa
+una firma de depuración. Si Google Play rechaza el reemplazo por diferencia de firma,
+desinstala una vez la copia de pruebas e instala la versión de Play.
+
+En cada lanzamiento, aumenta `versionCode` en `android/app/build.gradle`, sincroniza
+la versión actual de la web en Capacitor y sube el AAB firmado a la misma aplicación
+en Play Console. Puedes validar la primera actualización desde una pista de pruebas.
+Google Play instala los lanzamientos siguientes si el usuario tiene habilitadas las
+actualizaciones automáticas.
+
+La versión web instalable desde diclik.vercel.app comprueba si hay cambios al abrir
+una nueva sesión de la aplicación. Esa instalación se realiza desde el navegador.

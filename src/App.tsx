@@ -1,3 +1,4 @@
+import { InstallDiclik } from "./components/InstallDiclik";
 import React, { useState, lazy, Suspense } from "react";
 import { ArrowRight, BriefcaseBusiness, UserRound, Wrench, type LucideIcon } from "lucide-react";
 import { Capacitor, registerPlugin } from "@capacitor/core";
@@ -85,6 +86,7 @@ export default function App() {
               </li>
             ))}
           </ul>}
+          {market === "DO" && <InstallDiclik />}
           <p className="mt-5 text-center text-xs text-slate-400">{language === "en" ? "Created by Elisandro Álvarez" : language === "pt" ? "Criado por Elisandro Álvarez" : "Creado por Elisandro Álvarez"}</p>
         </section>
       </div>
