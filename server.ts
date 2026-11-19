@@ -340,14 +340,14 @@ app.use("/api", (err: any, _req: Request, res: Response, _next: NextFunction) =>
   }
 });
 
+app.use("/api", (_req, res) => {
+  res.status(404).json({ error: "Ruta de API no encontrada" });
+});
+
 // Mount Vite middleware or serve static dist folder
 async function configureServer() {
   await db.init();
   console.log("PostgreSQL database and versioned migrations ready.");
-
-  app.use("/api", (_req, res) => {
-    res.status(404).json({ error: "Ruta de API no encontrada" });
-  });
 
   if (!isProd) {
     console.log("Configuring Diclik.com server in development mode with Vite middleware...");
@@ -371,7 +371,11 @@ async function configureServer() {
   });
 }
 
-configureServer().catch((error) => {
-  console.error("No se pudo iniciar Diclik.com:", error);
-  process.exit(1);
-});
+if (!process.env.VERCEL) {
+  configureServer().catch((error) => {
+    console.error("No se pudo iniciar Diclik.com:", error);
+    process.exit(1);
+  });
+}
+
+export default app;

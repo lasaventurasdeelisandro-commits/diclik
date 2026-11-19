@@ -18,7 +18,6 @@ class DatabaseManager {
   private initPromise: Promise<void> | null = null;
 
   async init(): Promise<void> {
-    if (this.isInitialized) return;
     if (!this.initPromise) {
       this.initPromise = this._doInit().catch((err) => {
         this.initPromise = null;
@@ -36,7 +35,7 @@ class DatabaseManager {
       await this.pgliteInstance.waitReady;
     } else {
       const sqlHost = process.env.SQL_HOST;
-      const databaseUrl = process.env.DATABASE_URL;
+      const databaseUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL;
 
       if (sqlHost || databaseUrl) {
         console.log("[DB] Connecting to external PostgreSQL server via pg.Pool...");
@@ -167,6 +166,7 @@ class DatabaseManager {
         .filter((s) => s.length > 0);
 
       await this.transaction(async (tx) => {
+        if (this.pgPool) await tx.query("SELECT pg_advisory_xact_lock(241109, 4001);");
         for (const statement of statements) {
           await tx.query(statement);
         }
