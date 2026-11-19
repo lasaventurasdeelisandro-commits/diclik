@@ -32,25 +32,41 @@ accreditationRouter.get("/mine", ...specialistOnly, safe(async (req, res) => {
 }));
 
 accreditationRouter.put("/mine", ...specialistOnly, safe(async (req, res) => {
-  const { kind, photo, document } = req.body;
-  if (!["titulo", "diploma", "carta"].includes(kind) ||
-      !validFile(photo, 180 * 1024, true) || !validFile(document, 1024 * 1024)) {
-    res.status(400).json({ error: "Adjunta una foto JPG o PNG de hasta 180 KB y un documento PDF, JPG o PNG de hasta 1 MB." });
+  const { kind, photo, document, references, referencesConsent } = req.body;
+  const isReferences = kind === "referencias";
+  const role = req.user!.role;
+  if (!["titulo", "diploma", "carta", "referencias"].includes(kind) ||
+      (isReferences && role !== "tecnico") || (kind === "carta" && role === "tecnico")) {
+    res.status(400).json({ error: "Selecciona una modalidad de acreditación válida para tu perfil." });
     return;
   }
+  const evidence = isReferences ? references : [document];
+  if (!validFile(photo, 180 * 1024, true) || !Array.isArray(evidence) ||
+      evidence.length !== (isReferences ? 3 : 1) ||
+      !evidence.every(file => validFile(file, isReferences ? 400 * 1024 : 1024 * 1024)) ||
+      (isReferences && (referencesConsent !== true || new Set(evidence.map(file => file.data)).size !== 3))) {
+    res.status(400).json({
+      error: isReferences
+        ? "Adjunta tu foto y tres cartas diferentes de clientes, con su permiso. Cada carta debe ser PDF, JPG o PNG de hasta 400 KB."
+        : "Adjunta una foto JPG o PNG de hasta 180 KB y un documento PDF, JPG o PNG de hasta 1 MB.",
+    });
+    return;
+  }
+  const [firstFile, ...extraReferences] = evidence;
   const result = await db.transaction(async tx => {
     const userId = req.user!.id;
     await tx.query("SELECT user_id FROM professional_profiles WHERE user_id = $1 FOR UPDATE", [userId]);
     const row = await tx.query(
       `INSERT INTO specialist_accreditations
-         (user_id, revision, kind, photo_mime, photo_data, document_mime, document_data)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+         (user_id, revision, kind, photo_mime, photo_data, document_mime, document_data, extra_references)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (user_id) DO UPDATE SET revision = EXCLUDED.revision, kind = EXCLUDED.kind,
        photo_mime = EXCLUDED.photo_mime, photo_data = EXCLUDED.photo_data,
        document_mime = EXCLUDED.document_mime, document_data = EXCLUDED.document_data,
+       extra_references = EXCLUDED.extra_references,
        status = 'pending', reason = NULL, submitted_at = NOW(), reviewed_at = NULL
        RETURNING ${metadata}`,
-      [userId, randomUUID(), kind, photo.mime, photo.data, document.mime, document.data]
+      [userId, randomUUID(), kind, photo.mime, photo.data, firstFile.mime, firstFile.data, JSON.stringify(extraReferences.map(({ mime, data }) => ({ mime, data })))]
     );
     await tx.query("UPDATE professional_profiles SET verified = FALSE WHERE user_id = $1", [userId]);
     return row.rows[0];
@@ -74,16 +90,23 @@ accreditationRouter.get("/files/:userId/:revision/:part", requireAuth, safe(asyn
     res.sendStatus(403);
     return;
   }
-  if (part !== "photo" && part !== "document") {
+  const extraIndex = part === "reference-2" ? 0 : part === "reference-3" ? 1 : null;
+  if (part !== "photo" && part !== "document" && extraIndex === null) {
     res.sendStatus(404);
     return;
   }
-  const result = await db.query(
-    `SELECT ${part}_mime AS mime, ${part}_data AS data FROM specialist_accreditations
-      WHERE user_id = $1 AND revision::text = $2`, [userId, revision]
-  );
+  const columns = part === "photo" ? "photo_mime AS mime, photo_data AS data"
+    : "document_mime AS mime, document_data AS data";
+  const result = extraIndex === null
+    ? await db.query(`SELECT ${columns} FROM specialist_accreditations WHERE user_id = $1 AND revision::text = $2`, [userId, revision])
+    : await db.query(
+      `SELECT extra_references -> $3::int ->> 'mime' AS mime,
+              extra_references -> $3::int ->> 'data' AS data
+       FROM specialist_accreditations WHERE user_id = $1 AND revision::text = $2 AND kind = 'referencias'`,
+      [userId, revision, extraIndex]
+    );
   const file = result.rows[0];
-  if (!file) {
+  if (!file?.data) {
     res.sendStatus(404);
     return;
   }

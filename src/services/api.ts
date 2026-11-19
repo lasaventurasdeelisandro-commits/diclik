@@ -8,7 +8,7 @@ const API_BASE = configuredBase.endsWith("/api/v1") ? configuredBase : `${config
 
 export type Accreditation = {
   revision: string;
-  kind: "titulo" | "diploma" | "carta";
+  kind: "titulo" | "diploma" | "carta" | "referencias";
   status: "pending" | "approved" | "rejected";
   reason: string | null;
 };
@@ -423,7 +423,7 @@ export const api = {
       const res = await fetch(`${API_BASE}/accreditation/mine`, { headers: getAuthHeader(), signal });
       return handleResponse(res, "No se pudo consultar la acreditación");
     },
-    async submit(data: { kind: Accreditation["kind"]; photo: UploadFile; document: UploadFile }): Promise<Accreditation> {
+    async submit(data: { kind: Accreditation["kind"]; photo: UploadFile; document?: UploadFile; references?: UploadFile[]; referencesConsent?: boolean }): Promise<Accreditation> {
       const res = await fetch(`${API_BASE}/accreditation/mine`, {
         method: "PUT",
         headers: { "Content-Type": "application/json", ...getAuthHeader() },
@@ -435,7 +435,7 @@ export const api = {
       const res = await fetch(`${API_BASE}/accreditation/review`, { headers: getAuthHeader() });
       return handleResponse(res, "No se pudieron cargar las acreditaciones");
     },
-    async download(userId: string, revision: string, part: "photo" | "document") {
+    async download(userId: string, revision: string, part: "photo" | "document" | "reference-2" | "reference-3") {
       const res = await fetch(`${API_BASE}/accreditation/files/${encodeURIComponent(userId)}/${encodeURIComponent(revision)}/${part}`, { headers: getAuthHeader() });
       if (!res.ok) throw new Error("No se pudo descargar el archivo.");
       const blob = await res.blob();
@@ -443,7 +443,7 @@ export const api = {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `${part === "photo" ? "foto" : "documento"}.${extension}`;
+      link.download = `${part === "photo" ? "foto" : part === "document" ? "documento" : part}.${extension}`;
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 30000);
     },

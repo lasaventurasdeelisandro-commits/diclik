@@ -718,7 +718,7 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
               )}
 
               {panelTab === "perfil" && (currentUser.role === "tecnico" || currentUser.role === "profesional") &&
-                <SpecialistAccreditation key={currentUser.id} />}
+                <div key={currentUser.id}><SpecialistAccreditation role={currentUser.role} /></div>}
 
               {panelTab === "billetera" && (
                 <div className="space-y-2.5">
