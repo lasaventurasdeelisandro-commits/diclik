@@ -11,7 +11,7 @@ type Role = "cliente" | "tecnico" | "profesional";
 type View = "requests" | "radar" | "contracts" | "chat";
 type RequestRow = { id: string; title: string; description: string; status: string; address?: string; photos?: string[] };
 type Offer = { id: string; pro_name: string; professional_id: string; price: number; counter_price?: number; counter_proposed_by?: string; message: string; status: string };
-type Contract = { agreed_price: number; commission_rate: number; platform_fee: number; professional_payout: number; id: string; request_title: string; status: string; address: string; otp_code?: string; professional_id: string; client_id: string };
+type Contract = { completed_at?: string; pro_name?: string; agreed_price: number; commission_rate: number; platform_fee: number; professional_payout: number; id: string; request_title: string; status: string; address: string; otp_code?: string; professional_id: string; client_id: string };
 type Conversation = { id: string; request_title: string; client_name: string; pro_name: string };
 type Message = { id: string; sender_name: string; content: string };
 type GPS = { lat: number; lng: number; updated_at?: string };
@@ -260,6 +260,19 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
             <dt>Comisión DICLIK ({percent.format(item.commission_rate)})</dt><dd>{pesos.format(item.platform_fee)}</dd>
             <dt>Neto del especialista</dt><dd className="font-bold text-emerald-300">{pesos.format(item.professional_payout)}</dd>
           </dl>
+        )}
+        {item.status === "completed" && user?.id === item.client_id && (
+          <details className="rounded-xl border border-slate-700 bg-slate-950/70 p-3 text-sm">
+            <summary className="cursor-pointer font-bold text-amber-200">Ver comprobante del servicio</summary>
+            <dl className="mt-3 grid grid-cols-[1fr_auto] gap-2">
+              <dt>Servicio</dt><dd>{item.request_title}</dd>
+              <dt>Referencia</dt><dd>{item.id}</dd>
+              {item.pro_name && <><dt>Especialista</dt><dd>{item.pro_name}</dd></>}
+              {item.completed_at && <><dt>Fecha de cierre</dt><dd>{new Date(item.completed_at).toLocaleDateString("es-DO", { timeZone: "America/Santo_Domingo" })}</dd></>}
+              <dt className="font-bold">Total acordado</dt><dd className="font-bold">{pesos.format(item.agreed_price)}</dd>
+            </dl>
+            <p className="mt-3 text-xs text-slate-400">Comprobante informativo de DICLIK.</p>
+          </details>
         )}
         {item.otp_code && active.includes(item.status) && <p>Código OTP: <strong>{item.otp_code}</strong></p>}
         {user && active.includes(item.status) && (item.client_id === user.id || item.professional_id === user.id) && (
