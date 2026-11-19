@@ -103,6 +103,54 @@ export function AccountIdentity() {
   </UploadSection>;
 }
 
+export function ClientProfilePhoto() {
+  const [avatar, setAvatar] = useState<string | null>(null);
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [formVersion, setFormVersion] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    api.accreditation.clientPhoto(controller.signal).then(result => setAvatar(result.avatar)).catch(() => {
+      if (!controller.signal.aborted) setMessage("No se pudo consultar tu foto de perfil.");
+    });
+    return () => controller.abort();
+  }, []);
+
+  async function save(file: File | null) {
+    setBusy(true);
+    setMessage("");
+    try {
+      const prepared = file ? await encodeFile(await prepareImage(file, 480, 120 * 1024)) : null;
+      const result = await api.accreditation.updateClientPhoto(prepared);
+      setAvatar(result.avatar);
+      setFormVersion(version => version + 1);
+      setMessage(file ? "Foto de perfil guardada." : "Foto de perfil retirada.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo guardar el cambio.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <UploadSection tone="portrait" title="Foto de perfil">
+    <p>Sube una foto de tu rostro. Los especialistas podrán verla junto a tus solicitudes.</p>
+    {avatar && <img src={avatar} alt="Tu foto de perfil" className="size-14 rounded-full object-cover" referrerPolicy="no-referrer" />}
+    <form key={formVersion} className="space-y-2" onSubmit={event => {
+      event.preventDefault();
+      const file = new FormData(event.currentTarget).get("profilePhoto");
+      if (file instanceof File && file.size) void save(file);
+    }}>
+      <UploadField name="profilePhoto" action="Seleccionar foto de perfil" accept="image/*" tone="portrait" disabled={busy} />
+      <div className="flex flex-wrap gap-2">
+        <button type="submit" className={`${button} min-h-10`} disabled={busy}>Guardar foto de perfil</button>
+        {avatar && <button type="button" className={`${button} min-h-10`} disabled={busy} onClick={() => void save(null)}>Quitar foto</button>}
+      </div>
+    </form>
+    {message && <p role="status">{message}</p>}
+  </UploadSection>;
+}
+
 export function SpecialistAccreditation({ role }: { role: "tecnico" | "profesional" }) {
   const [kind, setKind] = useState<Accreditation["kind"]>("titulo");
   const [record, setRecord] = useState<Accreditation | null>(null);

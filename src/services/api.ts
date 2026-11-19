@@ -384,7 +384,7 @@ export const api = {
       const query = new URLSearchParams({
         role, lat: center.lat.toFixed(2), lng: center.lng.toFixed(2), radius: String(radius),
       });
-      const res = await fetch(`${API_BASE}/radar/requests?${query}`);
+      const res = await fetch(`${API_BASE}/radar/requests?${query}`, { headers: getAuthHeader() });
       return handleResponse(res, "No se pudieron consultar las solicitudes del radar.");
     },
 
@@ -465,6 +465,18 @@ export const api = {
   },
 
   accreditation: {
+    async clientPhoto(signal?: AbortSignal): Promise<{ avatar: string | null }> {
+      const res = await fetch(`${API_BASE}/accreditation/client-photo`, { headers: getAuthHeader(), signal });
+      return handleResponse(res, "No se pudo consultar tu foto de perfil.");
+    },
+    async updateClientPhoto(photo: UploadFile | null): Promise<{ avatar: string | null }> {
+      const res = await fetch(`${API_BASE}/accreditation/client-photo`, {
+        method: photo ? "PUT" : "DELETE",
+        headers: { "Content-Type": "application/json", ...getAuthHeader() },
+        ...(photo ? { body: JSON.stringify({ photo }) } : {}),
+      });
+      return handleResponse(res, "No se pudo guardar el cambio de foto.");
+    },
     async sponsorship(signal?: AbortSignal): Promise<PremiumPublication> {
       const res = await fetch(`${API_BASE}/accreditation/sponsorship`, { headers: getAuthHeader(), signal });
       return handleResponse(res, "No se pudo consultar la promoción.");

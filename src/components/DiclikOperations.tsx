@@ -1,3 +1,4 @@
+import { ServicePreview, requestPhotos, type ServiceArea } from "./ServicePreview";
 import type { WorkAlert } from "../services/publicationSound";
 import { FormEvent, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { RadarPoint } from "./RadarMap";
@@ -10,10 +11,10 @@ const RadarMap = lazy(() => import("./RadarMap").then(module => ({ default: modu
 
 type Role = "cliente" | "tecnico" | "profesional";
 type View = "requests" | "radar" | "contracts" | "chat";
-type RequestRow = { id: string; client_id?: string; target_role?: Role; title: string; description: string; status: string; category_name?: string; urgency?: string; min_budget?: number; address?: string; photos?: string[] };
+type RequestRow = { id: string; client_id?: string; target_role?: Role; title: string; description: string; status: string; category_name?: string; urgency?: string; min_budget?: number; address?: string; photos?: string[]; client_name?: string; client_avatar?: string | null; approximate_area?: ServiceArea | null };
 type RadarRequest = {
   id: string; title: string; status: string; category: string | null;
-  approxLat: number; approxLng: number; min_budget: number; distanceKm: number;
+  approxLat: number; approxLng: number; min_budget: number; distanceKm: number; clientAvatar?: string | null; clientName?: string | null;
 };
 type Offer = { id: string; pro_name: string; professional_id: string; price: number; counter_price?: number; counter_proposed_by?: string; message: string; status: string };
 type Contract = { completed_at?: string; pro_name?: string; agreed_price: number; commission_rate: number; platform_fee: number; professional_payout: number; id: string; request_title: string; status: string; address: string; otp_code?: string; professional_id: string; client_id: string };
@@ -181,7 +182,7 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
     scan.then(() => { if (current) setScanned(true); })
       .catch(() => { if (current) setRadarError(true); });
     return () => { current = false; };
-  }, [view, role, mapCenter, radarRevision]);
+  }, [view, role, user?.id, mapCenter, radarRevision]);
 
   async function run(task: () => Promise<void>, success?: string) {
     setBusy(true);
@@ -228,6 +229,7 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
         <h3 className="font-bold">{row.title}</h3>
         <p>{row.description}</p>
         <p className="text-slate-300">{statusLabel[row.status] || row.status}</p>
+        {!isClient && <ServicePreview area={row.approximate_area} avatar={row.client_avatar} clientName={user ? row.client_name : undefined} />}
         {!offerPanel && <button className={button} onClick={() => {
           setOfferResult(null);
           setSelection(id => id === row.id ? "" : row.id);
@@ -249,7 +251,7 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
             : <p role="status" className="text-slate-300">{offers.length
                 ? `${offers.length} ${offers.length === 1 ? "propuesta recibida" : "propuestas recibidas"}`
                 : ["open", "negotiating"].includes(row.status) ? "Esperando cotizaciones. Las ofertas aparecerán aquí." : "Esta solicitud no tiene ofertas."}</p>)}
-          {row.photos?.filter(url => /^(https:\/\/|data:image\/(jpeg|png|webp|gif);base64,)/.test(url)).map((url, index) =>
+          {requestPhotos(row.photos).map((url, index) =>
             <img key={index} src={url} alt={`Foto de la solicitud ${index + 1}`} className="max-h-32 rounded-lg object-contain" />
           )}
           {offers.filter(offer => (isClient && row.client_id === user?.id) || offer.professional_id === user?.id).map(offer => <div key={offer.id} className={card}>
@@ -338,6 +340,7 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
           <h4 className="font-bold text-white">{item.title}</h4>
           <p className="text-slate-300">{item.category || "Servicio"} · {statusLabel[item.status]} · {item.distanceKm} km aprox.</p>
           {Number(item.min_budget) > 0 && <p>Presupuesto desde {pesos.format(item.min_budget)}</p>}
+          <ServicePreview avatar={item.clientAvatar} clientName={item.clientName} area={{ lat: item.approxLat, lng: item.approxLng }} />
           <button type="button" className={button} onClick={() => onOpenRadarRequest?.(item.id)}>Ver detalles de la solicitud</button>
         </article>)}
       </div>}

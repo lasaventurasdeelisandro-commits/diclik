@@ -70,6 +70,27 @@ accreditationRouter.post("/sponsorship", ...specialistOnly, safe(async (req, res
   res.json({ requested: true });
 }));
 
+accreditationRouter.get("/client-photo", requireAuth, requireRole("cliente"), safe(async (req, res) => {
+  const result = await db.query("SELECT avatar_url FROM users WHERE id = $1", [req.user!.id]);
+  res.json({ avatar: result.rows[0]?.avatar_url ?? null });
+}));
+
+accreditationRouter.put("/client-photo", requireAuth, requireRole("cliente"), safe(async (req, res) => {
+  const { photo } = req.body ?? {};
+  if (!validFile(photo, 120 * 1024, true)) {
+    res.status(400).json({ error: "Adjunta una foto de perfil válida en JPG o PNG." });
+    return;
+  }
+  const avatar = `data:${photo.mime};base64,${photo.data}`;
+  await db.query("UPDATE users SET avatar_url = $2, updated_at = NOW() WHERE id = $1", [req.user!.id, avatar]);
+  res.json({ avatar });
+}));
+
+accreditationRouter.delete("/client-photo", requireAuth, requireRole("cliente"), safe(async (req, res) => {
+  await db.query("UPDATE users SET avatar_url = NULL, updated_at = NOW() WHERE id = $1", [req.user!.id]);
+  res.json({ avatar: null });
+}));
+
 accreditationRouter.get("/identity", requireAuth, safe(async (req, res) => {
   const result = await db.query("SELECT submitted_at FROM identity_documents WHERE user_id = $1", [req.user!.id]);
   res.json({ submitted: result.rows.length > 0 });

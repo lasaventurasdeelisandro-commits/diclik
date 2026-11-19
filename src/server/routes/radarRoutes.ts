@@ -1,5 +1,6 @@
 import { isQuickAccessCategory } from "../../quickAccess.ts";
 import { Router, Request, Response } from "express";
+import { optionalUser } from "../middleware/auth.ts";
 import { db } from "../db/index.ts";
 
 export const radarRouter = Router();
@@ -106,6 +107,7 @@ radarRouter.get("/specialists", async (req: Request, res: Response) => {
 
 // Open requests for the selected specialist role. Exact destinations remain on the contract.
 radarRouter.get("/requests", async (req: Request, res: Response) => {
+  res.setHeader("Cache-Control", "private, no-store");
   const { role } = req.query;
   const lat = Number(req.query.lat ?? 18.48);
   const lng = Number(req.query.lng ?? -69.94);
@@ -121,17 +123,20 @@ radarRouter.get("/requests", async (req: Request, res: Response) => {
   const centerLng = Math.round(lng * 100) / 100;
   const latRange = radius / 110 + 0.01;
   try {
+    const caller = await optionalUser(req);
     const { rows } = await db.query(
       `SELECT r.id, r.title, r.status, r.min_budget,
-              c.name AS category,
+              c.name AS category, CASE WHEN $4 THEN u.avatar_url ELSE NULL END AS "clientAvatar",
+              CASE WHEN $4 THEN u.full_name ELSE NULL END AS "clientName",
               ROUND(r.lat::numeric, 2)::double precision AS "approxLat",
               ROUND(r.lng::numeric, 2)::double precision AS "approxLng"
-       FROM service_requests r LEFT JOIN service_categories c ON c.id = r.category_id
+       FROM service_requests r JOIN users u ON u.id = r.client_id
+       LEFT JOIN service_categories c ON c.id = r.category_id
        WHERE r.target_role = $1 AND r.status IN ('open', 'negotiating') AND r.location_confirmed
          AND r.preferred_professional_id IS NULL
          AND r.lat BETWEEN $2 AND $3
        ORDER BY r.created_at DESC`,
-      [role, centerLat - latRange, centerLat + latRange],
+      [role, centerLat - latRange, centerLat + latRange, caller?.role === role || caller?.role === "admin"],
     );
     res.json(rows.map(row => ({
       ...row,

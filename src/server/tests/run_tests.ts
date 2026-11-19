@@ -643,6 +643,12 @@ export async function runAllTests() {
         if (response.status !== 201) throw new Error("No se pudo preparar la solicitud del radar.");
         return response.body.requestId;
       }
+      const portrait = { mime: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aR9sAAAAASUVORK5CYII=" };
+      const avatar = `data:${portrait.mime};base64,${portrait.data}`;
+      const saved = await apiCall("/accreditation/client-photo", {
+        method: "PUT", headers: clientHeaders, body: JSON.stringify({ photo: portrait }),
+      });
+      if (saved.status !== 200 || saved.body.avatar !== avatar) throw new Error("No se guardó la foto de perfil del cliente.");
       const technician = await createRadarRequest("tecnico", 18.48431);
       const professional = await createRadarRequest("profesional", 18.48431);
       const distant = await createRadarRequest("tecnico", 19.78);
@@ -657,6 +663,20 @@ export async function runAllTests() {
           throw new Error("El radar de solicitudes mezcló roles, mostró solicitudes fuera de zona o expuso datos privados.");
         }
       }
+      const signedRadar = await apiCall("/radar/requests?role=tecnico", { headers });
+      const publicRadar = await apiCall("/radar/requests?role=tecnico");
+      const specialistDetail = await apiCall(`/services/${technician}`, { headers });
+      const publicDetail = await apiCall(`/services/${technician}`);
+      if (signedRadar.body.find((item: any) => item.id === technician)?.clientAvatar !== avatar ||
+          publicRadar.body.find((item: any) => item.id === technician)?.clientAvatar !== null ||
+          specialistDetail.body.client_avatar !== avatar || specialistDetail.body.approximate_area?.lat !== 18.48 ||
+          specialistDetail.body.approximate_area?.lng !== -69.93 || specialistDetail.body.address !== null ||
+          specialistDetail.body.lat !== null || specialistDetail.body.lng !== null ||
+          publicDetail.body.approximate_area !== null || publicDetail.body.client_avatar !== null) {
+        throw new Error("La solicitud no mostró la foto autorizada o expuso datos privados.");
+      }
+      const removed = await apiCall("/accreditation/client-photo", { method: "DELETE", headers: clientHeaders });
+      if (removed.status !== 200 || removed.body.avatar !== null) throw new Error("No se pudo retirar la foto de perfil.");
       await Promise.all([technician, professional, distant].map(id =>
         apiCall(`/services/${id}`, { method: "DELETE", headers: clientHeaders })));
 

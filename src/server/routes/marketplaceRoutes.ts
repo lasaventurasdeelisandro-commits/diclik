@@ -71,14 +71,20 @@ marketplaceRouter.get("/categories", async (_req: Request, res: Response) => {
   }
 });
 
+function requestArea(row: { location_confirmed: boolean; lat: number | null; lng: number | null; target_role: string }, role?: string) {
+  if (!row.location_confirmed || row.lat == null || row.lng == null || (role !== "admin" && role !== row.target_role)) return null;
+  return { lat: Math.round(row.lat * 100) / 100, lng: Math.round(row.lng * 100) / 100 };
+}
+
 // GET /api/v1/services (List service requests without exposing PII or private OTP codes)
 marketplaceRouter.get("/services", async (req: Request, res: Response) => {
+  res.setHeader("Cache-Control", "private, no-store");
   try {
     const caller = await optionalUser(req);
     const { category, targetRole, status, clientId } = req.query;
     let query = `
       SELECT sr.id, sr.client_id, sr.category_id, sr.target_role, sr.title, sr.description,
-             sr.address, sr.lat, sr.lng, sr.urgency, sr.budget_strategy, sr.min_budget,
+             sr.address, sr.lat, sr.lng, sr.location_confirmed, sr.urgency, sr.budget_strategy, sr.min_budget,
              sr.status, sr.accepted_offer_id, sr.photos, sr.created_at, sr.updated_at,
              u.full_name as client_name, u.avatar_url as client_avatar, u.phone as client_phone,
              sc.name as category_name, sc.icon as category_icon,
@@ -129,6 +135,8 @@ marketplaceRouter.get("/services", async (req: Request, res: Response) => {
         address: canSeePhone ? row.address : null,
         lat: canSeePhone ? row.lat : null,
         lng: canSeePhone ? row.lng : null,
+        approximate_area: requestArea(row, caller?.role),
+        client_avatar: canSeePhone || caller?.role === row.target_role ? row.client_avatar : null,
         photos: caller ? row.photos : []
       };
     });
@@ -252,12 +260,13 @@ marketplaceRouter.post("/services", requireAuth, requireIdentity, async (req: Au
 
 // GET /api/v1/services/:id (Single service request detail without leaking PII/OTP)
 marketplaceRouter.get("/services/:id", async (req: Request, res: Response) => {
+  res.setHeader("Cache-Control", "private, no-store");
   try {
     const caller = await optionalUser(req);
     const { id } = req.params;
     const result = await db.query(
       `SELECT sr.id, sr.client_id, sr.category_id, sr.target_role, sr.title, sr.description,
-              sr.preferred_professional_id, sr.address, sr.lat, sr.lng, sr.urgency, sr.budget_strategy, sr.min_budget,
+              sr.preferred_professional_id, sr.address, sr.lat, sr.lng, sr.location_confirmed, sr.urgency, sr.budget_strategy, sr.min_budget,
               sr.status, sr.accepted_offer_id, sr.photos, sr.created_at, sr.updated_at,
               u.full_name as client_name, u.avatar_url as client_avatar, u.phone as client_phone,
               sc.name as category_name, sc.icon as category_icon
@@ -284,6 +293,8 @@ marketplaceRouter.get("/services/:id", async (req: Request, res: Response) => {
       address: canSeePhone ? row.address : null,
       lat: canSeePhone ? row.lat : null,
       lng: canSeePhone ? row.lng : null,
+      approximate_area: requestArea(row, caller?.role),
+      client_avatar: canSeePhone || caller?.role === row.target_role ? row.client_avatar : null,
       photos: caller ? row.photos : [],
     });
   } catch {

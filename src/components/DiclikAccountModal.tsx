@@ -1,6 +1,6 @@
 import { PremiumPromotion } from "./PremiumPromotion";
 import { getWorkAlertMode, setWorkAlertMode, unlockWorkAlerts } from "../services/publicationSound";
-import { AccountIdentity, SpecialistAccreditation } from "./Accreditation";
+import { AccountIdentity, ClientProfilePhoto, SpecialistAccreditation } from "./Accreditation";
 import React, { useEffect, useState } from "react";
 import {
   X,
@@ -653,6 +653,9 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
                 <div key={`premium-${currentUser.id}`}><PremiumPromotion /></div>}
 
               {panelTab === "perfil" && <AccountIdentity key={`identity-${currentUser.id}`} />}
+
+              {panelTab === "perfil" && currentUser.role === "cliente" &&
+                <div key={`portrait-${currentUser.id}`}><ClientProfilePhoto /></div>}
 
               {panelTab === "perfil" && (currentUser.role === "tecnico" || currentUser.role === "profesional") &&
                 <div key={`accreditation-${currentUser.id}`}><SpecialistAccreditation role={currentUser.role} /></div>}

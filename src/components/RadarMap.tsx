@@ -9,12 +9,13 @@ export interface RadarPoint {
   lng: number;
 }
 
-export function RadarMap({ center, points, selected, onSelect, connect = false, onMapClick, label = "Mapa de servicios cercanos" }: {
+export function RadarMap({ center, points, selected, onSelect, connect = false, areaRadius, onMapClick, label = "Mapa de servicios cercanos" }: {
   center: { lat: number; lng: number };
   points: RadarPoint[];
   selected: string | null;
   onSelect: (id: string) => void;
   connect?: boolean;
+  areaRadius?: number;
   onMapClick?: (point: { lat: number; lng: number }) => void;
   label?: string;
 }) {
@@ -64,6 +65,11 @@ export function RadarMap({ center, points, selected, onSelect, connect = false, 
     const layer = markers.current;
     if (!layer) return;
     layer.clearLayers();
+    if (areaRadius) {
+      L.circle([center.lat, center.lng], {
+        radius: areaRadius, color: "#059669", weight: 2, fillOpacity: 0.2, interactive: false,
+      }).addTo(layer);
+    }
     if (connect && points.length === 2) {
       L.polyline(points.map(point => [point.lat, point.lng]), {
         color: "#2563eb", weight: 5, dashArray: "8 8",
@@ -80,7 +86,7 @@ export function RadarMap({ center, points, selected, onSelect, connect = false, 
         .on("click", () => onSelect(point.id))
         .addTo(layer);
     });
-  }, [points, selected, onSelect, connect]);
+  }, [points, selected, onSelect, connect, areaRadius, center.lat, center.lng]);
 
   return <div ref={container} aria-label={label} className="relative z-0 h-64 w-full rounded-xl border border-slate-700" />;
 }
