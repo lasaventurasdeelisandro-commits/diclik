@@ -1,6 +1,6 @@
 import path from "path";
 import fs from "fs";
-import { PGlite } from "@electric-sql/pglite";
+import type { PGlite } from "@electric-sql/pglite";
 import { Pool } from "pg";
 import dotenv from "dotenv";
 
@@ -31,6 +31,7 @@ class DatabaseManager {
     if (this.isInitialized) return;
 
     if (process.env.NODE_ENV === "test") {
+      const { PGlite } = await import("@electric-sql/pglite");
       this.pgliteInstance = new PGlite();
       await this.pgliteInstance.waitReady;
     } else {
@@ -69,6 +70,7 @@ class DatabaseManager {
         if (!fs.existsSync(dataDir)) {
           fs.mkdirSync(dataDir, { recursive: true });
         }
+        const { PGlite } = await import("@electric-sql/pglite");
         this.pgliteInstance = new PGlite(dataDir);
         await this.pgliteInstance.waitReady;
       }
@@ -80,6 +82,9 @@ class DatabaseManager {
       await this.seedInitialData();
     } catch (error) {
       this.isInitialized = false;
+      const pool = this.pgPool;
+      this.pgPool = null;
+      if (pool) await pool.end();
       throw error;
     }
   }
@@ -147,7 +152,7 @@ class DatabaseManager {
     console.log("[DB] Verifying and running PostgreSQL versioned migrations...");
     const migrationsDir = path.join(process.cwd(), "src", "server", "db", "migrations");
     if (!fs.existsSync(migrationsDir)) {
-      throw new Error(`No se encontró el directorio de migraciones: ${migrationsDir}`);
+      throw Object.assign(new Error("No se encontraron las migraciones de DICLIK."), { code: "DICLIK_MIGRATIONS_MISSING" });
     }
 
     const migrationFiles = fs

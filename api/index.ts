@@ -22,7 +22,13 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
   } catch (error) {
     console.error("DICLIK PostgreSQL initialization:", error);
     res.writeHead(503, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-    res.end(JSON.stringify({ status: "degraded", database: "error" }));
+    const code = (error as { code?: string } | null)?.code;
+    const reason = code === "DICLIK_MIGRATIONS_MISSING" ? "migrations_missing"
+      : code === "ERR_MODULE_NOT_FOUND" || code === "MODULE_NOT_FOUND" ? "runtime_dependency"
+      : code === "28P01" || code === "28000" ? "credentials_rejected"
+      : code === "ENOTFOUND" || code === "ECONNREFUSED" || code === "ETIMEDOUT" ? "connection_unavailable"
+      : "initialization_failed";
+    res.end(JSON.stringify({ status: "degraded", database: "error", reason }));
     return;
   }
 
