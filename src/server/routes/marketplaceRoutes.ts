@@ -918,8 +918,8 @@ marketplaceRouter.post("/contracts/:id/verify-otp", requireAuth, async (req: Aut
 
       await tx.query(
         `INSERT INTO financial_transactions (id, user_id, contract_id, type, amount, status, idempotency_key, description)
-         VALUES ($1, NULL, $2, 'fee_deduction', $3, 'completed', $4, 'Comisión transaccional de plataforma Diclik.com (30%)');`,
-        ["tx_" + crypto.randomUUID().slice(0, 12), id, contract.platform_fee, "idem_fee_" + id]
+         VALUES ($1, NULL, $2, 'fee_deduction', $3, 'completed', $4, $5);`,
+        ["tx_" + crypto.randomUUID().slice(0, 12), id, contract.platform_fee, "idem_fee_" + id, `Comisión transaccional de plataforma Diclik.com (${Math.round(Number(contract.commission_rate) * 10000) / 100}%)`]
       );
 
       await tx.query(

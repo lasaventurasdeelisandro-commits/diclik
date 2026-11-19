@@ -12,12 +12,10 @@ walletRouter.get("/ledger", requireAuth, async (req: AuthenticatedRequest, res: 
     const user = req.user!;
     const result = await db.query("SELECT * FROM wallet_ledgers WHERE user_id = $1;", [user.id]);
 
-    if (result.rows.length === 0) {
-      res.json({ balance_available: 0, balance_locked_escrow: 0, total_earned: 0, total_spent: 0 });
-      return;
-    }
-
-    res.json(result.rows[0]);
+    res.json({
+      ...(result.rows[0] ?? { balance_available: 0, balance_locked_escrow: 0, total_earned: 0, total_spent: 0 }),
+      withdrawal_available: process.env.NODE_ENV === "test",
+    });
   } catch {
     res.status(500).json({ error: "Error al consultar estado de billetera" });
   }
@@ -313,6 +311,10 @@ walletRouter.post("/webhooks/payment", async (req: PaymentWebhookRequest, res: R
 
 // POST /api/v1/wallet/withdraw (Audited withdrawal request from available balance with idempotency)
 walletRouter.post("/withdraw", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (process.env.NODE_ENV !== "test") {
+    res.status(503).json({ error: "Los retiros bancarios aún no están habilitados." });
+    return;
+  }
   try {
     const user = req.user!;
     const { amount, destinationAccount, idempotencyKey } = req.body;

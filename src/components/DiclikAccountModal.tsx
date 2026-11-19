@@ -734,9 +734,9 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
                   </div>
                   <div className="p-2.5 bg-blue-950/40 border border-blue-500/30 rounded-xl text-[10px] text-blue-200 flex items-center space-x-2">
                     <ShieldCheck className="w-4 h-4 text-blue-400 shrink-0" />
-                    <span>Acreditaciones reales vía pasarela autorizada y webhook HMAC-SHA256.</span>
+                    <span>{wallet?.withdrawal_available ? "Billetera de pruebas. Los retiros quedan simulados." : "Los retiros bancarios aún no están habilitados."}</span>
                   </div>
-                  <form onSubmit={handleRequestWithdraw} className="p-2.5 bg-slate-950 border border-slate-800 rounded-2xl space-y-2">
+                  <form hidden={!wallet?.withdrawal_available} onSubmit={handleRequestWithdraw} className="p-2.5 bg-slate-950 border border-slate-800 rounded-2xl space-y-2">
                     <div className="text-[10px] font-bold text-slate-300 uppercase">Solicitar Retiro Bancario</div>
                     <div className="grid grid-cols-2 gap-1.5">
                       <input

@@ -11,7 +11,7 @@ type Role = "cliente" | "tecnico" | "profesional";
 type View = "requests" | "radar" | "contracts" | "chat";
 type RequestRow = { id: string; title: string; description: string; status: string; address?: string; photos?: string[] };
 type Offer = { id: string; pro_name: string; professional_id: string; price: number; counter_price?: number; counter_proposed_by?: string; message: string; status: string };
-type Contract = { id: string; request_title: string; status: string; address: string; otp_code?: string; professional_id: string; client_id: string };
+type Contract = { agreed_price: number; commission_rate: number; platform_fee: number; professional_payout: number; id: string; request_title: string; status: string; address: string; otp_code?: string; professional_id: string; client_id: string };
 type Conversation = { id: string; request_title: string; client_name: string; pro_name: string };
 type Message = { id: string; sender_name: string; content: string };
 type GPS = { lat: number; lng: number; updated_at?: string };
@@ -26,6 +26,9 @@ const statusLabel: Record<string, string> = {
   cancelled: "Cancelada", disputed: "En disputa", pending: "Pendiente", countered: "Contraoferta",
   accepted: "Aceptada", rejected: "Rechazada",
 };
+
+const pesos = new Intl.NumberFormat("es-DO", { style: "currency", currency: "DOP" });
+const percent = new Intl.NumberFormat("es-DO", { style: "percent", maximumFractionDigits: 2 });
 
 const initialRadarCenter = { lat: 18.48, lng: -69.94 };
 const radarRadius = 15;
@@ -253,6 +256,13 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
       {contracts.map(item => <article className={card} key={item.id}>
         <h3 className="font-bold">{item.request_title}</h3>
         <p>{statusLabel[item.status] || item.status}</p>
+        {(active.includes(item.status) || item.status === "completed") && (
+          <dl className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 rounded-xl bg-slate-950/70 p-3 text-xs">
+            <dt>Precio acordado</dt><dd className="font-bold">{pesos.format(item.agreed_price)}</dd>
+            <dt>Comisión DICLIK ({percent.format(item.commission_rate)})</dt><dd>{pesos.format(item.platform_fee)}</dd>
+            <dt>Neto del especialista</dt><dd className="font-bold text-emerald-300">{pesos.format(item.professional_payout)}</dd>
+          </dl>
+        )}
         {item.otp_code && active.includes(item.status) && <p>Código OTP: <strong>{item.otp_code}</strong></p>}
         {user && active.includes(item.status) && (item.client_id === user.id || item.professional_id === user.id) && (
           <ContractMap contractId={item.id} isClient={item.client_id === user.id} address={item.address} />

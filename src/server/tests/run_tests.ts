@@ -467,6 +467,13 @@ export async function runAllTests() {
         throw new Error(`Desembolso incorrecto al técnico: ${proLedger.body.balance_available}`);
       }
 
+      const fee = await db.query(
+        "SELECT amount FROM financial_transactions WHERE contract_id = $1 AND type = 'fee_deduction';", [contractId]
+      );
+      if (fee.rows.length !== 1 || Number(fee.rows[0].amount) !== 750) {
+        throw new Error("La comisión del 30% no se registró correctamente.");
+      }
+
       // Leave review
       const revRes = await apiCall(`/contracts/${contractId}/review`, {
         method: "POST",
