@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MapPin, Sparkles, Wrench } from "lucide-react";
 
 export type RadarSpecialist = {
@@ -24,13 +25,66 @@ function price(value?: number) {
   return value != null && value > 0 ? `RD$ ${money.format(value)}` : null;
 }
 
+function placeMarkers(specialists: RadarSpecialist[], width: number, height: number) {
+  const columnWidth = 78;
+  const rowHeight = 65;
+  const candidates = Array.from({ length: Math.floor((height - 34) / rowHeight) }, (_, row) =>
+    Array.from({ length: Math.floor(width / columnWidth) }, (_, column) => ({
+      x: columnWidth * (column + 0.5) + (width % columnWidth) / 2,
+      y: rowHeight * (row + 0.5) + 4,
+    })),
+  ).flat().filter(({ x, y }) => Math.abs(x - width / 2) >= 70 || Math.abs(y - height / 2) >= 52);
+
+  const placed: { specialist: RadarSpecialist; x: number; y: number }[] = [];
+  for (const specialist of specialists) {
+    if (!Number.isFinite(specialist.latOffset) || !Number.isFinite(specialist.lngOffset)) continue;
+    const x = width * specialist.lngOffset / 100;
+    const y = height * (100 - specialist.latOffset) / 100;
+    const distance = (point: { x: number; y: number }) => Math.hypot(point.x - x, point.y - y);
+    if (x >= columnWidth / 2 && x <= width - columnWidth / 2 && y >= rowHeight / 2 &&
+        y <= height - rowHeight / 2 - 34 &&
+        (Math.abs(x - width / 2) >= 70 || Math.abs(y - height / 2) >= 52) &&
+        placed.every(point => Math.abs(point.x - x) >= columnWidth || Math.abs(point.y - y) >= rowHeight)) {
+      placed.push({ specialist, x, y });
+      continue;
+    }
+    const closest = candidates.filter(candidate =>
+      placed.every(point => Math.abs(point.x - candidate.x) >= columnWidth || Math.abs(point.y - candidate.y) >= rowHeight),
+    ).sort((a, b) => distance(a) - distance(b))[0];
+    if (closest) placed.push({ specialist, ...closest });
+  }
+  return placed;
+}
+
 export function RadarGrid({ specialists, selected, onSelect, hasLocation }: {
   specialists: RadarSpecialist[];
   selected: string | null;
   onSelect: (id: string) => void;
   hasLocation: boolean;
 }) {
-  return <div aria-label="Radar de especialistas" className="relative isolate h-64 overflow-hidden rounded-2xl border-2 border-slate-700 bg-slate-950 sm:h-72"
+  const container = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    if (!container.current) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      setSize({ width, height });
+    });
+    observer.observe(container.current);
+    return () => observer.disconnect();
+  }, []);
+  const markers = useMemo(() => {
+    const ordered = [...specialists].sort((a, b) => a.id.localeCompare(b.id));
+    const placed = placeMarkers(ordered, size.width, size.height);
+    const selectedSpecialist = ordered.find(item => item.id === selected);
+    if (selectedSpecialist && !placed.some(marker => marker.specialist.id === selected)) {
+      return placeMarkers([selectedSpecialist, ...ordered.filter(item => item !== selectedSpecialist)], size.width, size.height);
+    }
+    return placed;
+  }, [specialists, selected, size]);
+  const remaining = specialists.length - markers.length;
+
+  return <div ref={container} aria-label="Radar de especialistas" className="relative isolate h-64 overflow-hidden rounded-2xl border-2 border-slate-700 bg-slate-950 sm:h-72"
     style={{ backgroundImage: "linear-gradient(#33415555 1px,transparent 1px),linear-gradient(90deg,#33415555 1px,transparent 1px)", backgroundSize: "30px 30px" }}>
     {[22, 47, 72].map(size => <div key={size} aria-hidden="true"
       className="pointer-events-none absolute left-1/2 top-1/2 aspect-square -translate-x-1/2 -translate-y-1/2 rounded-full border border-emerald-400/15"
@@ -50,23 +104,23 @@ export function RadarGrid({ specialists, selected, onSelect, hasLocation }: {
         {hasLocation ? "Tu zona" : "Santo Domingo"}
       </span>
     </div>
-    {specialists.filter(item => Number.isFinite(item.latOffset) && Number.isFinite(item.lngOffset)).map(item => {
+    {markers.map(({ specialist: item, x, y }) => {
       const active = item.id === selected;
       const Icon = item.type === "profesional" ? Sparkles : Wrench;
       return <button key={item.id} type="button" aria-label={`${item.trade} · ${item.name}`} aria-pressed={active}
         onClick={() => onSelect(item.id)}
         className={`absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-1 focus-visible:z-30 ${active ? "z-20" : "z-10"}`}
-        style={{ left: `${item.lngOffset}%`, top: `${100 - item.latOffset}%` }}>
+        style={{ left: x, top: y }}>
         <span className={`grid size-9 place-items-center rounded-full border-2 shadow-lg ${active ? "border-amber-100 bg-amber-400 text-slate-950 ring-4 ring-amber-400/25" : "border-indigo-300/60 bg-indigo-700 text-white"}`}>
           <Icon aria-hidden="true" className="size-4" />
         </span>
-        <span className={`whitespace-nowrap rounded-lg border px-1.5 py-0.5 text-[10px] font-extrabold ${active ? "border-amber-300 bg-amber-400 text-slate-950" : "border-slate-700 bg-slate-900 text-slate-100"}`}>
+        <span className={`max-w-[74px] truncate whitespace-nowrap rounded-lg border px-1.5 py-0.5 text-[10px] font-extrabold ${active ? "border-amber-300 bg-amber-400 text-slate-950" : "border-slate-700 bg-slate-900 text-slate-100"}`}>
           {price(item.basePrice) ?? item.trade}{item.etaMin != null && ` · ${item.etaMin} min`}
         </span>
       </button>;
     })}
     <a href="#radar-resultados" className="absolute bottom-2 right-2 z-30 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs font-bold text-amber-300">
-      Ver lista ↓
+      {remaining > 0 ? `Ver lista (+${remaining}) ↓` : "Ver lista ↓"}
     </a>
   </div>;
 }
