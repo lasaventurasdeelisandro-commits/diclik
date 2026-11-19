@@ -8,18 +8,10 @@ const AdminPage = (import.meta as ImportMeta & { env?: { VITE_DICLIK_ANDROID?: s
 const voice = registerPlugin<{ speak(options: { text: string }): Promise<void> }>("DiclikVoice");
 
 type Portal = "cliente" | "profesional" | "tecnico";
-const categories = [
-  {name:"Hogar",symbol:"🛠️",color:"#1768e8"},
-  {name:"Transporte",symbol:"🚗",color:"#12a94c"},
-  {name:"Compras",symbol:"🛒",color:"#f59e0b"},
-  {name:"Educación",symbol:"🎓",color:"#9333ea"},
-  {name:"Salud",symbol:"♥",color:"#ef244d"},
-  {name:"Empleo",symbol:"💼",color:"#009ed4"},
-];
-const roles: {id:Portal; name:string;description:string;color:string;symbol:string}[] = [
-  {id:"cliente",name:"Cliente",description:"Contrata servicios de forma rápida, segura y confiable.",color:"#086cf2",symbol:"👥"},
-  {id:"profesional",name:"Profesional",description:"Ofrece tus servicios, consigue más clientes y haz crecer tu negocio.",color:"#ff8b05",symbol:"👔"},
-  {id:"tecnico",name:"Técnico",description:"Conecta tu talento técnico con oportunidades de trabajo.",color:"#08a84c",symbol:"🛠"},
+const roles: { id: Portal; name: string; description: string; accent: string; symbol: string }[] = [
+  { id: "cliente", name: "Cliente", description: "Busca y contrata servicios", accent: "bg-blue-400/15 text-blue-300", symbol: "👥" },
+  { id: "profesional", name: "Profesional", description: "Ofrece tus servicios profesionales", accent: "bg-orange-400/15 text-orange-300", symbol: "👔" },
+  { id: "tecnico", name: "Técnico", description: "Encuentra trabajos de tu oficio", accent: "bg-emerald-400/15 text-emerald-300", symbol: "🛠" },
 ];
 
 export default function App() {
@@ -48,27 +40,37 @@ export default function App() {
     </div>
   );
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#031334] text-white flex items-center justify-center px-4 py-8 sm:py-12" style={{backgroundImage:"radial-gradient(ellipse at 50% 0%,#0c53a5 0%,#05265a 38%,#03102e 75%)"}}>
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-[0.13]">
-        <img src="/assets/brand/diclik-official-watermark.png" alt="" className="w-[1100px] max-w-none object-contain" />
-      </div>
-      <div className="relative z-10 w-full max-w-6xl flex flex-col items-center">
-        <img src="/assets/brand/diclik-official-watermark.png" alt="Diclik.com. Un clic, miles de soluciones" className="w-full max-w-[520px] max-h-[350px] object-contain rounded-2xl" />
-        <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 sm:gap-5 mt-4 mb-8 w-full max-w-3xl">
-          {categories.map(c=><div key={c.name} className="flex flex-col items-center gap-2"><div className="h-12 w-12 sm:h-16 sm:w-16 rounded-2xl shadow-lg border border-white/20 flex items-center justify-center text-2xl sm:text-3xl" style={{background:c.color}}>{c.symbol}</div><span className="text-xs sm:text-sm font-semibold">{c.name}</span></div>)}
-        </div>
-        <h1 className="text-xl sm:text-3xl font-bold text-center mb-7 drop-shadow">Selecciona tu rol para continuar</h1>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 w-full">
-          {roles.map(r=><section key={r.id} className="rounded-[26px] bg-white text-[#0b2450] border-2 overflow-hidden shadow-2xl" style={{borderColor:r.color}}>
-            <div className="h-16 flex justify-center items-center text-4xl text-white" style={{background:r.color}} aria-hidden="true">{r.symbol}</div>
-            <div className="p-5 flex flex-col items-center text-center gap-3 min-h-[230px]">
-              <h2 className="text-2xl font-extrabold">{r.name}</h2>
-              <p className="text-sm flex-1">{r.description}</p>
-              <button type="button" onClick={()=>{setPortal(r.id); handleSpeak(`Bienvenido a DICLIK. Has elegido el perfil de ${r.name}.`);}} className="rounded-full w-full px-3 py-3 text-white font-bold shadow-lg focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2" style={{background:r.color}}>Entrar como {r.name} →</button>
-            </div>
-          </section>)}
-        </div>
-        <p className="mt-8 text-sm text-slate-300 text-center">¿Ya tienes una cuenta? Selecciona tu rol para iniciar sesión o registrarte.</p>
+    <main className="flex min-h-dvh items-center justify-center bg-[#031334] px-5 py-8 text-white"
+      style={{ backgroundImage: "radial-gradient(ellipse at 50% 0%, #0c4387 0%, #031334 70%)" }}>
+      <div className="w-full max-w-md">
+        <img
+          src="/assets/brand/diclik-official-watermark.png"
+          alt="Diclik.com. Un clic, miles de soluciones"
+          className="mx-auto h-36 w-full object-contain sm:h-44"
+        />
+        <h1 className="mb-5 mt-3 text-center text-2xl font-bold sm:text-3xl">Elige tu perfil</h1>
+        <ul className="space-y-3">
+          {roles.map(role => (
+            <li key={role.id}>
+              <button
+                type="button"
+                aria-label={`Entrar como ${role.name}`}
+                onClick={() => {
+                  setPortal(role.id);
+                  handleSpeak(`Bienvenido a DICLIK. Has elegido el perfil de ${role.name}.`);
+                }}
+                className="flex w-full items-center gap-3 rounded-2xl border border-white/15 bg-white/[0.07] p-3 text-left transition-colors hover:border-blue-300/60 hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-300 sm:px-4"
+              >
+                <span aria-hidden="true" className={`grid size-11 shrink-0 place-items-center rounded-xl text-xl ${role.accent}`}>{role.symbol}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-base font-bold">{role.name}</span>
+                  <span className="mt-0.5 block text-sm leading-snug text-slate-300">{role.description}</span>
+                </span>
+                <span aria-hidden="true" className="pr-1 text-lg text-slate-300">→</span>
+              </button>
+            </li>
+          ))}
+        </ul>
       </div>
     </main>
   );
