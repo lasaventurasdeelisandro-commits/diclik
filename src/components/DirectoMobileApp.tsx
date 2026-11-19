@@ -1364,6 +1364,7 @@ export function DirectoMobileApp({
 
   // Account & Session State (Authenticated PostgreSQL user)
   const [authUser, setAuthUser] = useState<AuthUserSummary | null>(null);
+  const clientPortal = mobileRole === "cliente" && authUser?.role !== "admin";
   const [isAccountModalOpen, setIsAccountModalOpen] = useState<boolean>(false);
   const [publishedRequestId, setPublishedRequestId] = useState("");
   const [publicationMessage, setPublicationMessage] = useState("");
@@ -1672,7 +1673,12 @@ export function DirectoMobileApp({
         setIsAccountModalOpen(true);
         return;
       }
-      if (authUser.role !== "cliente" || publicationPending.current) return;
+      if (authUser.role !== "cliente") {
+        setPublicationMessage("Para publicar una solicitud, cierra la sesión de especialista e inicia sesión con una cuenta de Cliente.");
+        setIsAccountModalOpen(true);
+        return;
+      }
+      if (publicationPending.current) return;
       publicationPending.current = true;
       setPublicationMessage("");
       try {
@@ -2196,7 +2202,7 @@ export function DirectoMobileApp({
         
         {isDemo && <p role="status" className="rounded-lg bg-amber-950 p-2 text-amber-200 text-xs">Modo de pruebas · negociación, GPS y fondos de demostración</p>}
         {!isDemo && publicationMessage && <p role="status" className="rounded-lg bg-slate-800 p-2 text-sm">{publicationMessage}</p>}
-        {!isDemo && (currentScreen !== "home" || mobileRole !== "cliente" || (authUser && authUser.role !== "cliente")) && (
+        {!isDemo && (currentScreen !== "home" || !clientPortal) && (
           <div key={`${currentScreen}:${authUser?.id || ""}:${mobileRole}`}>
           <DiclikOperations
             view={currentScreen === "radar" || currentScreen === "profesionales" ? "radar" : currentScreen === "chat" ? "chat" : ["tracking", "otp", "tech_navigation"].includes(currentScreen) ? "contracts" : "requests"}
@@ -2209,7 +2215,7 @@ export function DirectoMobileApp({
           </div>
         )}
         {/* SCREEN 1: CLIENT HOME WITH UNIVERSAL SEARCH ENGINE & RADAR PROPOSALS */}
-        {currentScreen === "home" && (isDemo || (mobileRole === "cliente" && (!authUser || authUser.role === "cliente"))) && (
+        {currentScreen === "home" && (isDemo || clientPortal) && (
           <div className="space-y-3.5 animate-fadeIn">
             {/* COMPREHENSIVE CLIENT REQUEST BUILDER CARD */}
             <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 border-2 border-amber-400/60 p-4 rounded-3xl shadow-xl space-y-3.5 relative overflow-hidden">
@@ -4539,7 +4545,7 @@ export function DirectoMobileApp({
       <div className="p-2 bg-slate-950 border-t border-slate-800 grid grid-cols-5 gap-1 text-center text-[9px] sticky bottom-0 z-30">
         <button
           onClick={() => {
-            if (mobileRole === "cliente" && (!authUser || authUser.role === "cliente")) {
+            if (clientPortal) {
               setCurrentScreen("home");
             } else {
               setCurrentScreen("requests_feed");
