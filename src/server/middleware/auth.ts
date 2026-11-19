@@ -100,7 +100,7 @@ export async function optionalUser(req: Request): Promise<AuthenticatedUser | nu
 export async function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   const token = req.headers.authorization?.match(/^Bearer (\S+)$/)?.[1];
   if (!token) {
-    res.status(401).json({ error: "Acceso no autorizado: Token no proporcionado" });
+    res.status(401).json({ error: "Inicia sesión para continuar." });
     return;
   }
   try {
@@ -112,7 +112,7 @@ export async function requireAuth(req: AuthenticatedRequest, res: Response, next
       res.status(error.status).json({ error: error.message });
       return;
     }
-    res.status(401).json({ error: "Token inválido o expirado. Inicia sesión nuevamente." });
+    res.status(401).json({ error: "Tu sesión venció. Inicia sesión nuevamente." });
   }
 }
 

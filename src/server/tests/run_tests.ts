@@ -646,6 +646,8 @@ export async function runAllTests() {
           description: "Incluye mangueras",
           categoryId: "plomeria",
           address: "Piantini",
+          lat: 18.475,
+          lng: -69.94,
           minBudget: 1200
         })
       });
@@ -672,6 +674,13 @@ export async function runAllTests() {
       });
       if (accCnt.status !== 200 || Number(accCnt.body.agreedPrice) !== 1200 || accCnt.body.otpCode !== undefined) {
         throw new Error(`Accept no respetó la contraoferta o expuso el OTP al especialista: ${JSON.stringify(accCnt.body)}`);
+      }
+
+      const map = await apiCall(`/contracts/${accCnt.body.contractId}/location?view=map`, {
+        headers: { Authorization: `Bearer ${proToken}` }
+      });
+      if (map.status !== 200 || map.body.destination?.lat !== 18.475 || map.body.destination?.lng !== -69.94) {
+        throw new Error("El mapa del contrato no heredó el punto de la solicitud");
       }
 
       // Admin suspends pro temporarily -> JWT rejected -> Admin restores active

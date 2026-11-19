@@ -219,7 +219,7 @@ authRouter.post("/logout", requireAuth, async (req: AuthenticatedRequest, res: R
       ["aud_" + crypto.randomUUID().slice(0, 12), user.id, req.ip || null, JSON.stringify({ jti: user.jti })]
     );
 
-    res.json({ message: "Sesión cerrada y token revocado correctamente." });
+    res.json({ message: "Sesión cerrada." });
   } catch {
     res.status(500).json({ error: "Error al revocar la sesión" });
   }
@@ -391,7 +391,7 @@ authRouter.post("/reset-password", async (req: Request, res: Response) => {
   try {
     const { token, newPassword } = req.body;
     if (typeof token !== "string" || !/^[a-f0-9]{48}$/i.test(token.trim()) || typeof newPassword !== "string" || newPassword.length < 8 || newPassword.length > 128) {
-      res.status(400).json({ error: "Token válido y contraseña nueva (mínimo 8 caracteres) requeridos" });
+      res.status(400).json({ error: "Ingresa un código válido y una contraseña nueva de al menos 8 caracteres." });
       return;
     }
 
@@ -419,7 +419,7 @@ authRouter.post("/reset-password", async (req: Request, res: Response) => {
       );
     });
     if (!consumed) {
-      res.status(400).json({ error: "Token de recuperación inválido o expirado" });
+      res.status(400).json({ error: "El código de recuperación es inválido o venció." });
       return;
     }
 

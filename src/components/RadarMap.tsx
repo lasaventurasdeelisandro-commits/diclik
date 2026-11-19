@@ -9,12 +9,13 @@ export interface RadarPoint {
   lng: number;
 }
 
-export function RadarMap({ center, points, selected, onSelect, connect = false, label = "Mapa de servicios cercanos" }: {
+export function RadarMap({ center, points, selected, onSelect, connect = false, onMapClick, label = "Mapa de servicios cercanos" }: {
   center: { lat: number; lng: number };
   points: RadarPoint[];
   selected: string | null;
   onSelect: (id: string) => void;
   connect?: boolean;
+  onMapClick?: (point: { lat: number; lng: number }) => void;
   label?: string;
 }) {
   const container = useRef<HTMLDivElement>(null);
@@ -39,6 +40,14 @@ export function RadarMap({ center, points, selected, onSelect, connect = false, 
 
   useEffect(() => {
     const instance = map.current;
+    if (!instance || !onMapClick) return;
+    const selectPoint = (event: L.LeafletMouseEvent) => onMapClick(event.latlng.wrap());
+    instance.on("click", selectPoint);
+    return () => { instance.off("click", selectPoint); };
+  }, [onMapClick]);
+
+  useEffect(() => {
+    const instance = map.current;
     if (!instance) return;
     const location: L.LatLngTuple = [center.lat, center.lng];
     if (!points.length) {
@@ -46,10 +55,10 @@ export function RadarMap({ center, points, selected, onSelect, connect = false, 
       return;
     }
     instance.fitBounds(L.latLngBounds([location, ...points.map(point => L.latLng(point.lat, point.lng))]), {
-      maxZoom: connect ? 16 : 13,
+      maxZoom: connect || onMapClick ? 16 : 13,
       padding: [24, 24],
     });
-  }, [center.lat, center.lng, points, connect]);
+  }, [center.lat, center.lng, points, connect, onMapClick]);
 
   useEffect(() => {
     const layer = markers.current;

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { ServiceLocation, type ServicePoint } from "./ServiceLocation";
 import { DiclikOperations } from "./DiclikOperations";
 import { api } from "../services/api.ts";
 import { DiclikAccountModal, AuthUserSummary } from "./DiclikAccountModal.tsx";
@@ -1433,7 +1434,7 @@ export function DirectoMobileApp({
               photos: Array.isArray(r.photos) ? r.photos : [],
               escrowSecured: true,
               urgency: r.urgency || "urgente",
-              timeAgo: "En PostgreSQL",
+              timeAgo: "Publicada",
               latOffset: 45,
               lngOffset: 50,
               targetRole: r.target_role || "tecnico",
@@ -1505,6 +1506,7 @@ export function DirectoMobileApp({
   ] : []);
   const [clientPriceStrategy, setClientPriceStrategy] = useState<"intemperie" | "minimo">("intemperie");
   const [clientMinBudget, setClientMinBudget] = useState<string>("2400");
+  const [servicePoint, setServicePoint] = useState<ServicePoint | null>(null);
   const [clientAddressInput, setClientAddressInput] = useState<string>(isDemo ? "Av. Winston Churchill #402, Piantini, Santo Domingo" : "");
   const [clientUrgency, setClientUrgency] = useState<"urgente" | "express" | "programado">("urgente");
 
@@ -1683,6 +1685,10 @@ export function DirectoMobileApp({
         return;
       }
       if (publicationPending.current) return;
+      if (!clientAddressInput.trim() || !servicePoint) {
+        setPublicationMessage("Escribe la dirección y marca el lugar del servicio con el GPS o en el mapa.");
+        return;
+      }
       publicationPending.current = true;
       setPublicationMessage("");
       try {
@@ -1692,6 +1698,8 @@ export function DirectoMobileApp({
           title: term,
           description: clientProblemDetails.trim() || term,
           address: clientAddressInput.trim(),
+          lat: servicePoint.lat,
+          lng: servicePoint.lng,
           categoryId: registeredCategory?.id,
           targetRole: detectedTax.targetRole,
           urgency: clientUrgency,
@@ -2484,16 +2492,18 @@ export function DirectoMobileApp({
               <div className="space-y-1">
                 <label className="text-[10px] font-extrabold text-slate-300 uppercase tracking-wider flex items-center space-x-1">
                   <MapPin className="w-3 h-3 text-amber-400" />
-                  <span>Dirección del Servicio (Santo Domingo)</span>
+                  <span>Dirección del servicio</span>
                 </label>
                 <input
                   type="text"
                   aria-label="Dirección del servicio"
                   value={clientAddressInput}
-                  onChange={(e) => setClientAddressInput(e.target.value)}
+                  onChange={(e) => { setClientAddressInput(e.target.value); setServicePoint(null); }}
                   className="w-full bg-slate-950/80 border border-slate-700 rounded-xl px-3 py-2 text-[11px] text-slate-200 focus:outline-none focus:border-amber-400 font-medium"
                 />
               </div>
+
+              {!isDemo && <ServiceLocation point={servicePoint} onChange={setServicePoint} />}
 
               {/* PRIMARY CTA BUTTON: SOLICITAR SERVICIO Y ABRIR RADAR DE NEGOCIACIÓN */}
               <button

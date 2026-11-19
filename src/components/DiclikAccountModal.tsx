@@ -55,7 +55,6 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
   const [address, setAddress] = useState("Santo Domingo, República Dominicana");
   const [resetToken, setResetToken] = useState("");
   const [newPassword, setNewPassword] = useState("");
-  const [recoveryTokenPreview, setRecoveryTokenPreview] = useState<string | null>(null);
 
   useEffect(() => {
     setRole(initialRole);
@@ -194,7 +193,6 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
     try {
       const res = await api.auth.forgotPassword(email.trim());
       if (res.devResetToken) {
-        setRecoveryTokenPreview(res.devResetToken);
         setResetToken(res.devResetToken);
       }
       setFeedback({ type: "ok", msg: res.message });
@@ -234,7 +232,7 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
       if (currentUser) {
         onAuthChanged({ ...currentUser, fullName: editName.trim(), phone: editPhone.trim() });
       }
-      setFeedback({ type: "ok", msg: "Perfil actualizado en PostgreSQL." });
+      setFeedback({ type: "ok", msg: "Cambios guardados." });
     } catch (err: any) {
       setFeedback({ type: "err", msg: err.message });
     } finally {
@@ -262,7 +260,7 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
     await api.auth.logout();
     onAuthChanged(null);
     setLoading(false);
-    setFeedback({ type: "ok", msg: "Sesión cerrada y token revocado." });
+    setFeedback({ type: "ok", msg: "Sesión cerrada." });
   };
 
   const handleCancelContract = async (contractId: string) => {
@@ -540,7 +538,7 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
                 <div className="space-y-3">
                   <form onSubmit={handleForgotPassword} className="space-y-2">
                     <label className="text-[10px] font-bold text-slate-300 block">
-                      1. Solicitar token temporal de recuperación:
+                      1. Solicitar código de recuperación:
                     </label>
                     <input
                       type="email"
@@ -559,22 +557,16 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
                     </button>
                   </form>
 
-                  {recoveryTokenPreview && (
-                    <div className="p-2 bg-slate-950 border border-amber-400/40 rounded-xl text-[10px] text-amber-300 font-mono break-all">
-                      Token desarrollo: {recoveryTokenPreview}
-                    </div>
-                  )}
-
                   <form onSubmit={handleResetPassword} className="space-y-2 pt-2 border-t border-slate-800">
                     <label className="text-[10px] font-bold text-slate-300 block">
-                      2. Restablecer contraseña con tu token:
+                      2. Restablecer contraseña con tu código:
                     </label>
                     <input
                       type="text"
                       required
                       value={resetToken}
                       onChange={(e) => setResetToken(e.target.value)}
-                      placeholder="Token de recuperación"
+                      placeholder="Código de recuperación"
                       className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
                     />
                     <input
@@ -704,7 +696,7 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
                     disabled={loading}
                     className="w-full py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs rounded-xl cursor-pointer"
                   >
-                    Guardar Cambios en PostgreSQL
+                    Guardar cambios
                   </button>
                   <button
                     type="button"
@@ -712,7 +704,7 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
                     className="w-full py-2 bg-slate-800 hover:bg-rose-900/60 text-rose-300 font-bold text-xs rounded-xl flex items-center justify-center space-x-1.5 cursor-pointer"
                   >
                     <LogOut className="w-3.5 h-3.5" />
-                    <span>Cerrar Sesión y Revocar Token</span>
+                    <span>Cerrar sesión</span>
                   </button>
                 </form>
               )}

@@ -105,6 +105,12 @@ marketplaceRouter.post("/services", requireAuth, requireRole("cliente", "admin")
     const user = req.user!;
     const { title, description, categoryId, targetRole, address, lat, lng, urgency, budgetStrategy, minBudget, photos } = req.body;
 
+    if ((lat != null || lng != null) &&
+        (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180)) {
+      res.status(400).json({ error: "Selecciona un punto válido en el mapa." });
+      return;
+    }
+
     if (!title || !description || !address || String(title).trim().length < 3) {
       res.status(400).json({ error: "Título, descripción y dirección son obligatorios" });
       return;
@@ -127,8 +133,8 @@ marketplaceRouter.post("/services", requireAuth, requireRole("cliente", "admin")
       await tx.query(
         `INSERT INTO service_requests (
           id, client_id, category_id, target_role, title, description, address,
-          lat, lng, urgency, budget_strategy, min_budget, status, photos, release_code
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'open', $13, $14);`,
+          lat, lng, urgency, budget_strategy, min_budget, status, photos, release_code, location_confirmed
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'open', $13, $14, $15);`,
         [
           requestId,
           user.id,
@@ -137,13 +143,14 @@ marketplaceRouter.post("/services", requireAuth, requireRole("cliente", "admin")
           String(title).trim().slice(0, 240),
           String(description).trim().slice(0, 2000),
           String(address).trim().slice(0, 400),
-          Number(lat) || 18.4861,
-          Number(lng) || -69.9312,
+          lat ?? null,
+          lng ?? null,
           validUrgency,
           validStrategy,
           parsedBudget,
           Array.isArray(photos) ? photos.slice(0, 8) : [],
-          releaseCode
+          releaseCode,
+          lat != null && lng != null
         ]
       );
 
@@ -231,6 +238,9 @@ marketplaceRouter.patch("/services/:id", requireAuth, requireRole("cliente", "ad
       `UPDATE service_requests
        SET title = COALESCE($1, title),
            description = COALESCE($2, description),
+           location_confirmed = location_confirmed AND ($3::text IS NULL OR $3 = address),
+           lat = CASE WHEN $3::text IS NOT NULL AND $3 <> address THEN NULL ELSE lat END,
+           lng = CASE WHEN $3::text IS NOT NULL AND $3 <> address THEN NULL ELSE lng END,
            address = COALESCE($3, address),
            min_budget = COALESCE($4, min_budget),
            urgency = COALESCE($5, urgency),
@@ -584,6 +594,13 @@ marketplaceRouter.post("/offers/:id/accept", requireAuth, async (req: Authentica
             commission_rate, platform_fee, professional_payout, status, otp_code
           ) VALUES ($1, $2, $3, $4, $5, $6, 0.30, $7, $8, 'held_in_escrow', $9);`,
           [contractId, offer.request_id, payerId, offer.professional_id, id, agreedPrice, platformFee, proPayout, otpCode]
+        );
+
+        await tx.query(
+          `INSERT INTO contract_destinations (contract_id, lat, lng)
+           SELECT $1, lat, lng FROM service_requests
+           WHERE id = $2 AND location_confirmed;`,
+          [contractId, offer.request_id]
         );
 
         // 5. Lock funds in Escrow Hold table
@@ -1086,7 +1103,7 @@ marketplaceRouter.post("/contracts/:id/cancel", requireAuth, async (req: Authent
     });
 
     res.json({
-      message: "Contrato cancelado y liquidación financiera aplicada en PostgreSQL",
+      message: "Contrato cancelado y liquidación aplicada",
       cancellationId: cancelId,
       scenario,
       penaltyRatePercent: penaltyRate,
