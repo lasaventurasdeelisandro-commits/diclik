@@ -1,6 +1,7 @@
 import { FormEvent, lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { INITIAL_CATEGORIES } from "../data";
 import type { RadarPoint } from "./RadarMap";
+import { RadarGrid, RadarServiceCard, type RadarSort, type RadarSpecialist } from "./RadarServices";
 import { api } from "../services/api";
 import type { AuthUserSummary } from "./DiclikAccountModal";
 const RadarMap = lazy(() => import("./RadarMap").then(module => ({ default: module.RadarMap })));
@@ -12,7 +13,6 @@ type Offer = { id: string; pro_name: string; professional_id: string; price: num
 type Contract = { id: string; request_title: string; status: string; address: string; otp_code?: string; professional_id: string; client_id: string };
 type Conversation = { id: string; request_title: string; client_name: string; pro_name: string };
 type Message = { id: string; sender_name: string; content: string };
-type Specialist = { id: string; name: string; trade: string; distanceKm: number; latOffset: number; lngOffset: number };
 type GPS = { lat: number; lng: number; updated_at?: string };
 
 const card = "rounded-2xl border border-slate-700 bg-slate-800/80 p-3 space-y-2";
@@ -70,7 +70,7 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest }:
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [specialists, setSpecialists] = useState<Specialist[]>([]);
+  const [specialists, setSpecialists] = useState<RadarSpecialist[]>([]);
   const [gps, setGps] = useState<Record<string, GPS | null>>({});
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -79,15 +79,22 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest }:
   const [radarCenter, setRadarCenter] = useState<GPS | null>(null);
   const [radarSelected, setRadarSelected] = useState<string | null>(null);
   const [radarError, setRadarError] = useState(false);
+  const [radarSort, setRadarSort] = useState<RadarSort>("precio");
+  const [geographicMap, setGeographicMap] = useState(false);
+  const sortedSpecialists = useMemo(() => [...specialists].sort((a, b) => {
+    if (radarSort === "rating") return (b.rating ?? 0) - (a.rating ?? 0);
+    if (radarSort === "rapido") return (a.etaMin ?? Infinity) - (b.etaMin ?? Infinity);
+    return (a.basePrice ?? Infinity) - (b.basePrice ?? Infinity);
+  }), [specialists, radarSort]);
   const mapCenter = radarCenter ?? initialRadarCenter;
-  const radarPoints: RadarPoint[] = useMemo(() => specialists
+  const radarPoints: RadarPoint[] = useMemo(() => sortedSpecialists
     .filter(item => Number.isFinite(item.latOffset) && Number.isFinite(item.lngOffset))
     .map(item => ({
       id: item.id,
       label: `${item.trade} · ${item.name}`,
       lat: approximateCoordinate(mapCenter.lat + (item.latOffset - 50) * radarRadius / (35 * 111)),
       lng: approximateCoordinate(mapCenter.lng + (item.lngOffset - 50) * radarRadius / (35 * 111)),
-    })), [specialists, mapCenter]);
+    })), [sortedSpecialists, mapCenter]);
 
   const [adminUsers, setAdminUsers] = useState<{ id: string; email: string; role: string; status: string }[]>([]);
   const [disputes, setDisputes] = useState<{ id: string; reason: string; status: string }[]>([]);
@@ -122,7 +129,7 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest }:
     setScanned(false);
     setSpecialists([]);
     setRadarSelected(null);
-    api.radar.scan({ ...mapCenter, radius: radarRadius }).then((rows: Specialist[]) => {
+    api.radar.scan({ ...mapCenter, radius: radarRadius }).then((rows: RadarSpecialist[]) => {
       if (!current) return;
       setSpecialists(rows);
       setScanned(true);
@@ -213,16 +220,22 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest }:
     {view !== "radar" && <button className={button} disabled={busy} onClick={() => run(refresh)}>Actualizar</button>}
     {list}
     {view === "radar" && <>
-      <h2 className="font-bold text-emerald-300">Radar GPS</h2>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-bold text-emerald-300">Radar GPS</h2>
+        <button type="button" className={button} onClick={() => setGeographicMap(value => !value)}>
+          {geographicMap ? "Ver radar" : "Ver mapa de calles"}
+        </button>
+      </div>
       <figure className={card}>
-        <Suspense fallback={<p role="status">Cargando mapa…</p>}>
+        {geographicMap ? <Suspense fallback={<p role="status">Cargando mapa…</p>}>
           <RadarMap
             center={{ lat: approximateCoordinate(mapCenter.lat), lng: approximateCoordinate(mapCenter.lng) }}
             points={radarPoints}
             selected={radarSelected}
             onSelect={setRadarSelected}
           />
-        </Suspense>
+        </Suspense> : <RadarGrid specialists={sortedSpecialists} selected={radarSelected}
+          onSelect={setRadarSelected} hasLocation={Boolean(radarCenter)} />}
         <figcaption className="text-slate-300">
           {radarCenter ? "Zona aproximada de tu ubicación" : "Vista inicial de Santo Domingo"}
           {radarPoints.length > 0 && " · Marcadores aproximados"}
@@ -231,18 +244,21 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest }:
       <button className={button} disabled={busy} onClick={() => run(async () => {
         setRadarCenter(await position());
       })}>Buscar cerca de mi ubicación</button>
-      <h3 className="font-bold text-amber-300">Servicios cerca de ti</h3>
+      <div id="radar-resultados" className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="font-extrabold text-white">Especialistas disponibles</h3>
+        <div className="flex gap-1 rounded-xl border border-slate-700 bg-slate-800 p-1" aria-label="Ordenar especialistas">
+          {([["precio", "Precio"], ["rapido", "Rápido"], ["rating", "Rating"]] as const).map(([sort, label]) =>
+            <button key={sort} type="button" aria-pressed={radarSort === sort}
+              className={`rounded-lg px-2 py-1 text-xs font-bold ${radarSort === sort ? "bg-emerald-400 text-slate-950" : "text-slate-200"}`}
+              onClick={() => setRadarSort(sort)}>{label}</button>)}
+        </div>
+      </div>
       {radarError && <p role="status">La disponibilidad de especialistas no se puede consultar ahora.</p>}
       {!scanned && !radarError && <p role="status">Buscando especialistas…</p>}
       {scanned && !specialists.length && <p>No hay especialistas disponibles en el radio consultado.</p>}
-      {specialists.map(item => {
-        const markerIndex = radarPoints.findIndex(point => point.id === item.id);
-        return <button type="button" className={`${card} w-full text-left ${radarSelected === item.id ? "border-amber-300" : ""}`}
-          aria-pressed={radarSelected === item.id} key={item.id} onClick={() => setRadarSelected(item.id)}>
-          <strong>{markerIndex >= 0 ? `${markerIndex + 1}. ` : ""}{item.trade}</strong>
-          <p>{item.name} · {item.distanceKm} km aprox.</p>
-        </button>;
-      })}
+      {sortedSpecialists.map(item => <div key={item.id}>
+        <RadarServiceCard specialist={item} selected={radarSelected === item.id} onSelect={() => setRadarSelected(item.id)} />
+      </div>)}
       <h3 className="font-bold text-amber-300">Categorías de servicios</h3>
       <ul className="grid grid-cols-2 gap-2">
         {INITIAL_CATEGORIES.map(category => <li className={card} key={category.id}>{category.name}</li>)}
