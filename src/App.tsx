@@ -22,14 +22,15 @@ export default function App() {
   const [portal,setPortal] = useState<Portal|null>(null);
   const [voiceError, setVoiceError] = useState("");
   const handleSpeak = (text:string) => {
+    const spokenText = text.replace(/\bdiclik\b/gi, "Diclic");
     if (Capacitor.getPlatform() === "android" && Capacitor.isPluginAvailable("DiclikVoice")) {
       setVoiceError("");
-      void voice.speak({ text }).catch(error => setVoiceError(error.message || "No se pudo reproducir la voz de Android."));
+      void voice.speak({ text: spokenText }).catch(error => setVoiceError(error.message || "No se pudo reproducir la voz de Android."));
       return;
     }
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
     window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
+    const utterance = new SpeechSynthesisUtterance(spokenText);
     utterance.lang = "es-DO";
     window.speechSynthesis.speak(utterance);
   };
