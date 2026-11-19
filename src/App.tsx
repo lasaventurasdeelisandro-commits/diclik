@@ -1,5 +1,8 @@
 import React, { useState } from "react";
+import { Capacitor, registerPlugin } from "@capacitor/core";
 import { DirectoMobileApp } from "./components/DirectoMobileApp";
+
+const voice = registerPlugin<{ speak(options: { text: string }): Promise<void> }>("DiclikVoice");
 
 type Portal = "cliente" | "profesional" | "tecnico";
 const categories = [
@@ -18,7 +21,13 @@ const roles: {id:Portal; name:string;description:string;color:string;symbol:stri
 
 export default function App() {
   const [portal,setPortal] = useState<Portal|null>(null);
+  const [voiceError, setVoiceError] = useState("");
   const handleSpeak = (text:string) => {
+    if (Capacitor.getPlatform() === "android" && Capacitor.isPluginAvailable("DiclikVoice")) {
+      setVoiceError("");
+      void voice.speak({ text }).catch(error => setVoiceError(error.message || "No se pudo reproducir la voz de Android."));
+      return;
+    }
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
@@ -28,6 +37,7 @@ export default function App() {
   if (portal) return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <button type="button" onClick={()=>setPortal(null)} className="fixed z-[100] top-3 left-3 rounded-full bg-slate-950/90 border border-amber-400/50 px-4 py-2 text-white text-sm shadow-xl" aria-label="Volver a elegir rol">← Cambiar rol</button>
+      {voiceError && <p role="status" className="fixed z-[100] bottom-16 left-3 right-3 mx-auto max-w-md rounded-xl bg-slate-900 p-3 text-sm text-amber-200">{voiceError}</p>}
       <DirectoMobileApp standalone={true} onSpeak={handleSpeak} initialRole={portal}/>
     </div>
   );
@@ -48,7 +58,7 @@ export default function App() {
             <div className="p-5 flex flex-col items-center text-center gap-3 min-h-[230px]">
               <h2 className="text-2xl font-extrabold">{r.name}</h2>
               <p className="text-sm flex-1">{r.description}</p>
-              <button type="button" onClick={()=>setPortal(r.id)} className="rounded-full w-full px-3 py-3 text-white font-bold shadow-lg focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2" style={{background:r.color}}>Entrar como {r.name} →</button>
+              <button type="button" onClick={()=>{setPortal(r.id); handleSpeak(`Bienvenido a DICLIK. Has elegido el perfil de ${r.name}.`);}} className="rounded-full w-full px-3 py-3 text-white font-bold shadow-lg focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2" style={{background:r.color}}>Entrar como {r.name} →</button>
             </div>
           </section>)}
         </div>
