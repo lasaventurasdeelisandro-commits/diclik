@@ -537,60 +537,79 @@ export async function runAllTests() {
       return "PII protegido, RBAC aplicado, doble contratación bloqueada, Escrow OTP liberado y reseña registrada.";
     });
 
-    // 6. Cancellation 15% Rule & Escrow Dispute Resolution
-    await runTest("6. Penalización 15% por Cancelación y Resolución Administrativa de Disputa", async () => {
-      // Create 2nd request + offer + contract (RD$ 2,000) to test cancellation math
-      const s2 = await apiCall("/services", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${clientToken}` },
-        body: JSON.stringify({
-          title: "Revisión de breaker principal",
-          description: "Disyuntor disparándose",
-          categoryId: "electricidad",
-          address: "Piantini"
-        })
-      });
-      const o2 = await apiCall(`/services/${s2.body.requestId}/offers`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${proToken}` },
-        body: JSON.stringify({ price: 2000, etaMinutes: 10 })
-      });
-      const c2 = await apiCall(`/offers/${o2.body.offerId}/accept`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${clientToken}` }
-      });
-      const cancRes = await apiCall(`/contracts/${c2.body.contractId}/cancel`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${clientToken}` },
-        body: JSON.stringify({ scenario: "client_before_arrival", reason: "Resuelto antes de llegada" })
-      });
-      if (cancRes.status !== 200 || cancRes.body.clientRefundAmount !== 1700 || cancRes.body.penaltyAmount !== 300) {
-        throw new Error(`Cálculo cancelación 15% incorrecto: ${JSON.stringify(cancRes.body)}`);
+    await runTest("6. Confirmación de cancelación al 15% y 20%, y resolución de disputa", async () => {
+      const clientHeaders = { Authorization: `Bearer ${clientToken}` };
+      const proHeaders = { Authorization: `Bearer ${proToken}` };
+
+      async function hireForTest(title: string, price: number) {
+        const request = await apiCall("/services", {
+          method: "POST",
+          headers: clientHeaders,
+          body: JSON.stringify({ title, description: title, categoryId: "electricidad", address: "Piantini" })
+        });
+        const offer = await apiCall(`/services/${request.body.requestId}/offers`, {
+          method: "POST",
+          headers: proHeaders,
+          body: JSON.stringify({ price })
+        });
+        const contract = await apiCall(`/offers/${offer.body.offerId}/accept`, {
+          method: "POST",
+          headers: clientHeaders
+        });
+        if (!contract.body.contractId) throw new Error(`Fallo al contratar: ${JSON.stringify(contract.body)}`);
+        return `/contracts/${contract.body.contractId}`;
       }
 
-      // Create 3rd request + offer + contract (RD$ 1,000) to test Dispute & Admin Resolution
-      const s3 = await apiCall("/services", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${clientToken}` },
-        body: JSON.stringify({
-          title: "Instalación de cerradura inteligente",
-          description: "Puerta de madera",
-          categoryId: "cerrajeria",
-          address: "Bella Vista"
-        })
+      const beforeArrival = await hireForTest("Revisión de breaker principal", 2000);
+      const preview = await apiCall(`${beforeArrival}/cancel`, { headers: clientHeaders });
+      if (preview.status !== 200 || preview.body.penaltyRatePercent !== 15 ||
+          preview.body.penaltyAmount !== 300 || preview.body.clientRefundAmount !== 1700) {
+        throw new Error(`Vista previa del 15% incorrecta: ${JSON.stringify(preview.body)}`);
+      }
+      const unauthorized = await apiCall(`${beforeArrival}/cancel`, { headers: proHeaders });
+      const unconfirmed = await apiCall(`${beforeArrival}/cancel`, { method: "POST", headers: clientHeaders });
+      if (unauthorized.status !== 403 || unconfirmed.status !== 428) {
+        throw new Error("Se permitió consultar o cancelar sin autorización o confirmación.");
+      }
+      const cancelledEarly = await apiCall(`${beforeArrival}/cancel`, {
+        method: "POST", headers: clientHeaders, body: JSON.stringify({ expected: preview.body })
       });
-      const o3 = await apiCall(`/services/${s3.body.requestId}/offers`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${proToken}` },
-        body: JSON.stringify({ price: 1000, etaMinutes: 20 })
+      if (cancelledEarly.status !== 200 || cancelledEarly.body.clientRefundAmount !== 1700 ||
+          cancelledEarly.body.platformEarnings !== 45 || cancelledEarly.body.specialistCompensation !== 255) {
+        throw new Error(`Liquidación del 15% incorrecta: ${JSON.stringify(cancelledEarly.body)}`);
+      }
+
+      const afterArrival = await hireForTest("Revisión de toma", 2000);
+      const firstQuote = await apiCall(`${afterArrival}/cancel`, { headers: clientHeaders });
+      for (const status of ["active_in_transit", "in_progress"]) {
+        const transition = await apiCall(`${afterArrival}/status`, {
+          method: "PATCH", headers: proHeaders, body: JSON.stringify({ status })
+        });
+        if (transition.status !== 200) throw new Error(`Fallo al marcar ${status}.`);
+      }
+      const stale = await apiCall(`${afterArrival}/cancel`, {
+        method: "POST", headers: clientHeaders, body: JSON.stringify({ expected: firstQuote.body })
       });
-      const c3 = await apiCall(`/offers/${o3.body.offerId}/accept`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${clientToken}` }
+      if (stale.status !== 409 || stale.body.code !== "CANCELLATION_QUOTE_CHANGED") {
+        throw new Error("Se aceptó el importe anterior después de registrar la llegada.");
+      }
+      const updated = await apiCall(`${afterArrival}/cancel`, { headers: clientHeaders });
+      if (updated.status !== 200 || updated.body.penaltyRatePercent !== 20 ||
+          updated.body.penaltyAmount !== 400 || updated.body.clientRefundAmount !== 1600) {
+        throw new Error(`Vista previa del 20% incorrecta: ${JSON.stringify(updated.body)}`);
+      }
+      const cancelledLate = await apiCall(`${afterArrival}/cancel`, {
+        method: "POST", headers: clientHeaders, body: JSON.stringify({ expected: updated.body })
       });
-      const dispOpen = await apiCall(`/contracts/${c3.body.contractId}/dispute`, {
+      if (cancelledLate.status !== 200 || cancelledLate.body.clientRefundAmount !== 1600 ||
+          cancelledLate.body.platformEarnings !== 80 || cancelledLate.body.specialistCompensation !== 320) {
+        throw new Error(`Liquidación del 20% incorrecta: ${JSON.stringify(cancelledLate.body)}`);
+      }
+
+      const disputed = await hireForTest("Instalación de cerradura inteligente", 1000);
+      const dispOpen = await apiCall(`${disputed}/dispute`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${clientToken}` },
+        headers: clientHeaders,
         body: JSON.stringify({ reason: "El especialista no se presentó al sitio acordado" })
       });
       if (dispOpen.status !== 201) throw new Error("Fallo apertura de disputa");
@@ -602,7 +621,7 @@ export async function runAllTests() {
       });
       if (dispResolve.status !== 200) throw new Error("Fallo resolución de disputa por admin");
 
-      return "Penalización 15% (RD$ 300 / Reembolso RD$ 1,700) y arbitraje de disputa conciliados en PostgreSQL.";
+      return "Vista previa y liquidación al 15% y 20%, reconfirmación tras la llegada y resolución de disputa verificadas.";
     });
 
     // 7. Radar & Notifications Endpoints

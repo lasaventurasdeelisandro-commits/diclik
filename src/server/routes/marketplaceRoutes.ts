@@ -373,14 +373,24 @@ marketplaceRouter.delete("/services/:id", requireAuth, async (req: Authenticated
       return;
     }
 
-    await db.transaction(async (tx) => {
-      await tx.query("UPDATE service_requests SET status = 'cancelled', updated_at = NOW() WHERE id = $1;", [id]);
+    const cancelled = await db.transaction(async (tx) => {
+      const updated = await tx.query(
+        "UPDATE service_requests SET status = 'cancelled', updated_at = NOW() WHERE id = $1 AND status IN ('open', 'negotiating') RETURNING id;",
+        [id]
+      );
+      if (updated.rows.length === 0) return false;
       await tx.query("UPDATE offers SET status = 'rejected', updated_at = NOW() WHERE request_id = $1 AND status IN ('pending', 'countered');", [id]);
       await tx.query(
         "INSERT INTO audit_logs (id, actor_id, event_type, target_table, target_id, details) VALUES ($1, $2, 'SERVICE_REQUEST_CANCELLED', 'service_requests', $3, '{}');",
         ["aud_" + crypto.randomUUID().slice(0, 12), user.id, id]
       );
+      return true;
     });
+
+    if (!cancelled) {
+      res.status(409).json({ error: "La solicitud cambió. Revisa su estado antes de cancelar." });
+      return;
+    }
 
     res.json({ message: "Solicitud cancelada antes de contratación", requestId: id });
   } catch {
@@ -1106,65 +1116,84 @@ marketplaceRouter.post("/contracts/:id/verify-otp", requireAuth, async (req: Aut
   }
 });
 
-// POST /api/v1/contracts/:id/cancel (Auditable cancellation with Diclik penalty rules)
+type CancellationScenario = "client_before_arrival" | "client_after_arrival" | "tech_circumvention";
+
+function calculateCancellation(agreedPrice: number, scenario: CancellationScenario) {
+  const penaltyRatePercent = scenario === "tech_circumvention" ? 100 : scenario === "client_after_arrival" ? 20 : 15;
+  const agreedCents = Math.round(agreedPrice * 100);
+  const penaltyCents = Math.round(agreedCents * penaltyRatePercent / 100);
+  const refundAll = scenario === "tech_circumvention";
+  const platformCents = refundAll ? 0 : Math.round(penaltyCents * penaltyRatePercent / 100);
+  return {
+    penaltyRatePercent,
+    penaltyAmount: penaltyCents / 100,
+    platformEarnings: platformCents / 100,
+    specialistCompensation: refundAll ? 0 : (penaltyCents - platformCents) / 100,
+    clientRefundAmount: (refundAll ? agreedCents : agreedCents - penaltyCents) / 100
+  };
+}
+
+async function loadCancellableContract(req: AuthenticatedRequest, res: Response) {
+  const result = await db.query("SELECT * FROM contracts WHERE id = $1;", [req.params.id]);
+  const contract = result.rows[0];
+  if (!contract) {
+    res.status(404).json({ error: "Contrato no encontrado" });
+    return null;
+  }
+  const user = req.user!;
+  if (user.role !== "admin" && contract.client_id !== user.id) {
+    res.status(403).json({ error: "Solo el cliente o un administrador puede aplicar esta cancelación. El especialista puede abrir una disputa." });
+    return null;
+  }
+  if (!["held_in_escrow", "active_in_transit", "in_progress"].includes(contract.status)) {
+    res.status(409).json({ error: "Este contrato ya no se puede cancelar." });
+    return null;
+  }
+  return contract;
+}
+
+function clientCancellationScenario(status: string) {
+  return status === "in_progress" ? "client_after_arrival" : "client_before_arrival";
+}
+
+marketplaceRouter.get("/contracts/:id/cancel", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    res.set("Cache-Control", "private, no-store");
+    const contract = await loadCancellableContract(req, res);
+    if (!contract) return;
+    const scenario = clientCancellationScenario(contract.status);
+    const agreedPrice = Number(contract.agreed_price);
+    const { penaltyRatePercent, penaltyAmount, clientRefundAmount } = calculateCancellation(agreedPrice, scenario);
+    res.json({ agreedPrice, penaltyRatePercent, penaltyAmount, clientRefundAmount });
+  } catch {
+    res.status(500).json({ error: "No se pudo calcular la cancelación." });
+  }
+});
+
+// POST /api/v1/contracts/:id/cancel
 marketplaceRouter.post("/contracts/:id/cancel", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
     const { id } = req.params;
-    const { scenario: requestedScenario, reason } = req.body;
+    const { scenario: requestedScenario, reason, expected } = req.body ?? {};
+    const contract = await loadCancellableContract(req, res);
+    if (!contract) return;
 
-    const validScenarios = ["client_before_arrival", "client_after_arrival", "tech_circumvention"];
-    if (!validScenarios.includes(requestedScenario)) {
-      res.status(400).json({ error: "Escenario de cancelación inválido" });
-      return;
-    }
-
-    const contractRes = await db.query("SELECT * FROM contracts WHERE id = $1;", [id]);
-    if (contractRes.rows.length === 0) {
-      res.status(404).json({ error: "Contrato no encontrado" });
-      return;
-    }
-
-    const contract = contractRes.rows[0];
-    if (user.role !== "admin" && contract.client_id !== user.id) {
-      res.status(403).json({ error: "Solo el cliente o un administrador puede aplicar esta cancelación. El especialista puede abrir una disputa." });
-      return;
-    }
-
-    if (!["held_in_escrow", "active_in_transit", "in_progress"].includes(contract.status)) {
-      res.status(409).json({ error: "Solo se pueden cancelar contratos en custodia activa" });
-      return;
-    }
-
-    const scenario = user.role === "admin" && requestedScenario === "tech_circumvention"
-      ? "tech_circumvention"
-      : contract.status === "in_progress" ? "client_after_arrival" : "client_before_arrival";
+    const adminSanction = user.role === "admin" && requestedScenario === "tech_circumvention";
+    const scenario = adminSanction ? "tech_circumvention" : clientCancellationScenario(contract.status);
     const agreed = Number(contract.agreed_price);
-    let penaltyRate = 15;
-    let penaltyAmount = 0;
-    let platformEarnings = 0;
-    let specialistComp = 0;
-    let clientRefund = 0;
+    const cancellation = calculateCancellation(agreed, scenario);
+    const { penaltyRatePercent: penaltyRate, penaltyAmount, platformEarnings,
+      specialistCompensation: specialistComp, clientRefundAmount: clientRefund } = cancellation;
 
-    if (scenario === "client_before_arrival") {
-      penaltyRate = 15;
-      penaltyAmount = Math.round(agreed * 0.15 * 100) / 100;
-      platformEarnings = Math.round(penaltyAmount * 0.15 * 100) / 100;
-      specialistComp = Math.round((penaltyAmount - platformEarnings) * 100) / 100;
-      clientRefund = Math.round((agreed - penaltyAmount) * 100) / 100;
-    } else if (scenario === "client_after_arrival") {
-      penaltyRate = 20;
-      penaltyAmount = Math.round(agreed * 0.20 * 100) / 100;
-      platformEarnings = Math.round(penaltyAmount * 0.20 * 100) / 100;
-      specialistComp = Math.round((penaltyAmount - platformEarnings) * 100) / 100;
-      clientRefund = Math.round((agreed - penaltyAmount) * 100) / 100;
-    } else {
-      // tech_circumvention: 100% penalty/sanction, full client refund
-      penaltyRate = 100;
-      penaltyAmount = agreed;
-      platformEarnings = 0;
-      specialistComp = 0;
-      clientRefund = agreed;
+    if (!adminSanction && !expected) {
+      res.status(428).json({ error: "Actualiza Diclik y revisa el cargo y el reembolso antes de cancelar." });
+      return;
+    }
+    if (!adminSanction && (expected.agreedPrice !== agreed || expected.penaltyRatePercent !== penaltyRate ||
+        expected.penaltyAmount !== penaltyAmount || expected.clientRefundAmount !== clientRefund)) {
+      res.status(409).json({ code: "CANCELLATION_QUOTE_CHANGED", error: "Cambió el cargo de cancelación. Revisa el importe actualizado." });
+      return;
     }
 
     const cancelReason = String(reason || `Cancelación bajo regla ${scenario}`).trim();
@@ -1172,8 +1201,8 @@ marketplaceRouter.post("/contracts/:id/cancel", requireAuth, async (req: Authent
 
     await db.transaction(async (tx) => {
       const upd = await tx.query(
-        `UPDATE contracts SET status = 'cancelled' WHERE id = $1 AND status = $2 RETURNING id;`,
-        [id, contract.status]
+        `UPDATE contracts SET status = 'cancelled' WHERE id = $1 AND status = $2 AND agreed_price = $3 RETURNING id;`,
+        [id, contract.status, contract.agreed_price]
       );
       if (upd.rows.length === 0) throw new Error("CONFLICT_CANCEL");
 
@@ -1239,15 +1268,11 @@ marketplaceRouter.post("/contracts/:id/cancel", requireAuth, async (req: Authent
       message: "Contrato cancelado y liquidación aplicada",
       cancellationId: cancelId,
       scenario,
-      penaltyRatePercent: penaltyRate,
-      penaltyAmount,
-      platformEarnings,
-      specialistCompensation: specialistComp,
-      clientRefundAmount: clientRefund
+      ...cancellation
     });
   } catch (error: any) {
     if (error.message === "CONFLICT_CANCEL") {
-      res.status(409).json({ error: "El contrato ya fue cancelado o completado." });
+      res.status(409).json({ code: "CANCELLATION_QUOTE_CHANGED", error: "El contrato cambió. Consulta de nuevo el cargo de cancelación." });
       return;
     }
     console.error("[Cancel Contract Error]:", error?.message);

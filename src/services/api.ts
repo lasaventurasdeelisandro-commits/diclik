@@ -28,6 +28,12 @@ export type PremiumPublication = {
   active: { category: QuickAccessCategory; expires_at: string }[];
 };
 export type IdentitySubmission = { user_id: string; full_name: string; role: string; submitted_at: string };
+export type CancellationQuote = {
+  agreedPrice: number;
+  penaltyRatePercent: number;
+  penaltyAmount: number;
+  clientRefundAmount: number;
+};
 type UploadFile = { mime: string; data: string };
 
 export function isAdminPage() {
@@ -327,11 +333,18 @@ export const api = {
       return handleResponse(res, "Error al verificar código OTP");
     },
 
-    async cancelContract(contractId: string, scenario: "client_before_arrival" | "client_after_arrival" | "tech_circumvention", reason: string) {
+    async getCancellationQuote(contractId: string, signal?: AbortSignal): Promise<CancellationQuote> {
+      const res = await fetch(`${API_BASE}/contracts/${contractId}/cancel`, {
+        headers: { ...getAuthHeader() }, signal
+      });
+      return handleResponse(res, "No se pudo calcular la cancelación.");
+    },
+
+    async cancelContract(contractId: string, expected: CancellationQuote) {
       const res = await fetch(`${API_BASE}/contracts/${contractId}/cancel`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getAuthHeader() },
-        body: JSON.stringify({ scenario, reason })
+        body: JSON.stringify({ expected })
       });
       return handleResponse(res, "Error al cancelar contrato");
     },

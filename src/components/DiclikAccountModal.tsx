@@ -16,7 +16,7 @@ import {
   KeyRound,
   ShieldCheck
 } from "lucide-react";
-import { api } from "../services/api.ts";
+import { api, type CancellationQuote } from "../services/api.ts";
 import { getCurrentLocation } from "../services/geolocation";
 
 export interface AuthUserSummary {
@@ -34,6 +34,83 @@ interface DiclikAccountModalProps {
   initialRole: Exclude<AuthUserSummary["role"], "admin">;
   onAuthChanged: (user: AuthUserSummary | null) => void;
   onSpeak: (text: string) => void;
+}
+
+const cancellationCurrency = new Intl.NumberFormat("es-DO", { style: "currency", currency: "DOP" });
+
+function CancellationConfirmation({ contractId, onBack, onCancelled }: {
+  contractId: string;
+  onBack: () => void;
+  onCancelled: (refund: number) => void;
+}) {
+  const [quote, setQuote] = useState<CancellationQuote | null>(null);
+  const [loadingQuote, setLoadingQuote] = useState(true);
+  const [confirming, setConfirming] = useState(false);
+  const [revision, setRevision] = useState(0);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    api.services.getCancellationQuote(contractId, controller.signal)
+      .then(result => {
+        if (controller.signal.aborted) return;
+        setQuote(result);
+        setLoadingQuote(false);
+      })
+      .catch((err: Error) => {
+        if (controller.signal.aborted) return;
+        setError(err.message);
+        setLoadingQuote(false);
+      });
+    return () => controller.abort();
+  }, [contractId, revision]);
+
+  const refreshQuote = () => {
+    setQuote(null);
+    setLoadingQuote(true);
+    setRevision(value => value + 1);
+  };
+
+  const confirm = async () => {
+    if (!quote || confirming) return;
+    setConfirming(true);
+    setError("");
+    try {
+      const result = await api.services.cancelContract(contractId, quote);
+      onCancelled(result.clientRefundAmount);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo cancelar el servicio.");
+      if (err instanceof Error && "code" in err && err.code === "CANCELLATION_QUOTE_CHANGED") {
+        refreshQuote();
+      }
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  return <section aria-label="Confirmar cancelación" className="space-y-2 rounded-xl border border-amber-500/40 bg-slate-900 p-3 text-xs">
+    <h4 className="font-bold text-amber-200">Revisa el cargo antes de cancelar</h4>
+    {loadingQuote && <p role="status" className="text-slate-200">Calculando el cargo y el reembolso…</p>}
+    {error && <p role="alert" className="text-amber-200">{error}</p>}
+    {quote && <>
+      <p className="text-slate-200">{quote.penaltyRatePercent === 20
+        ? "El especialista ya registró su llegada."
+        : "El especialista aún no ha registrado su llegada."}</p>
+      <dl className="grid grid-cols-[1fr_auto] gap-x-2 gap-y-1 text-slate-100">
+        <dt>Precio acordado</dt><dd>{cancellationCurrency.format(quote.agreedPrice)}</dd>
+        <dt>Cargo por cancelación ({quote.penaltyRatePercent}%)</dt><dd>{cancellationCurrency.format(quote.penaltyAmount)}</dd>
+        <dt>Reembolso al saldo de Diclik</dt><dd className="font-bold text-emerald-300">{cancellationCurrency.format(quote.clientRefundAmount)}</dd>
+      </dl>
+    </>}
+    <div className="flex flex-wrap gap-2">
+      <button type="button" onClick={onBack} disabled={confirming} className="min-h-10 rounded-lg bg-slate-800 px-3 font-semibold text-white disabled:opacity-60">Mantener servicio</button>
+      {quote && <button type="button" onClick={confirm} disabled={confirming} className="min-h-10 rounded-lg bg-rose-700 px-3 font-bold text-white disabled:opacity-60">
+        {confirming ? "Cancelando…" : "Confirmar cancelación"}
+      </button>}
+      {!quote && !loadingQuote && <button type="button" onClick={() => { setError(""); refreshQuote(); }}
+        className="min-h-10 rounded-lg bg-slate-800 px-3 font-semibold text-white">Volver a consultar</button>}
+    </div>
+  </section>;
 }
 
 export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
@@ -87,6 +164,7 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
   const [reviewingContractId, setReviewingContractId] = useState<string | null>(null);
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewComment, setReviewComment] = useState("");
+  const [cancellingContractId, setCancellingContractId] = useState<string | null>(null);
   const [disputingContractId, setDisputingContractId] = useState<string | null>(null);
   const [disputeReason, setDisputeReason] = useState("");
   const [withdrawAmount, setWithdrawAmount] = useState("");
@@ -146,6 +224,10 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
       clearTimeout(timer);
     };
   }, [isOpen, notificationUserId, notificationRevision]);
+
+  useEffect(() => {
+    setCancellingContractId(null);
+  }, [isOpen, panelTab, notificationUserId]);
 
   if (!isOpen) return null;
 
@@ -265,27 +347,6 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
     onAuthChanged(null);
     setLoading(false);
     setFeedback({ type: "ok", msg: "Sesión cerrada." });
-  };
-
-  const handleCancelContract = async (contractId: string) => {
-    setLoading(true);
-    setFeedback(null);
-    try {
-      const res = await api.services.cancelContract(
-        contractId,
-        "client_before_arrival",
-        "Cancelación solicitada por usuario desde panel Diclik.com"
-      );
-      setFeedback({
-        type: "ok",
-        msg: `Contrato cancelado. Reembolso: RD$ ${Number(res.clientRefundAmount || 0).toLocaleString()}`
-      });
-      await loadAccountData();
-    } catch (err: any) {
-      setFeedback({ type: "err", msg: err.message });
-    } finally {
-      setLoading(false);
-    }
   };
 
   const handleOpenDispute = async (e: React.FormEvent) => {
@@ -845,20 +906,30 @@ export const DiclikAccountModal: React.FC<DiclikAccountModalProps> = ({
 
                         {["held_in_escrow", "active_in_transit", "in_progress"].includes(c.status) && (
                           <div className="flex gap-1.5 pt-1">
-                            {(currentUser.role === "cliente" || currentUser.role === "admin") && <button
-                              onClick={() => handleCancelContract(c.id)}
+                            {(currentUser.id === c.client_id || currentUser.role === "admin") && cancellingContractId !== c.id && <button
+                              onClick={() => { setFeedback(null); setDisputingContractId(null); setCancellingContractId(c.id); }}
                               className="flex-1 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[10px] font-bold cursor-pointer"
                             >
-                              Cancelar
+                              Revisar cancelación
                             </button>}
                             <button
-                              onClick={() => setDisputingContractId(c.id)}
+                              onClick={() => { setCancellingContractId(null); setDisputingContractId(c.id); }}
                               className="flex-1 py-1.5 bg-rose-950 hover:bg-rose-900 text-rose-200 border border-rose-500/40 rounded-lg text-[10px] font-bold cursor-pointer"
                             >
                               Abrir Disputa
                             </button>
                           </div>
                         )}
+
+                        {cancellingContractId === c.id && <CancellationConfirmation
+                          contractId={c.id}
+                          onBack={() => setCancellingContractId(null)}
+                          onCancelled={refund => {
+                            setCancellingContractId(null);
+                            setFeedback({ type: "ok", msg: `Contrato cancelado. Reembolso al saldo de Diclik: ${cancellationCurrency.format(refund)}.` });
+                            void loadAccountData();
+                          }}
+                        />}
 
                         {c.status === "completed" && (
                           <button

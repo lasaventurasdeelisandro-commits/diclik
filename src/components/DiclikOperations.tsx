@@ -381,7 +381,7 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
           }, "Cotización enviada.")} />}
           {isClient && user && row.client_id === user.id && ["open", "negotiating"].includes(row.status) && <button className={button} disabled={busy} onClick={() => run(async () => {
             await api.services.remove(row.id); await refresh();
-          }, "Solicitud cancelada.")}>Cancelar solicitud</button>}
+          }, "Solicitud cancelada.")}>Cancelar solicitud sin cargo</button>}
         </>}
       </article>) : <p>{offerPanel && !requestsLoaded && !notice ? "Cargando tu solicitud…" : "No hay solicitudes para mostrar."}</p>}
     </>
