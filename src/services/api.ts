@@ -240,11 +240,11 @@ export const api = {
       return handleResponse(res, "Error al obtener ofertas");
     },
 
-    async submitOffer(serviceId: string, price: number, etaMinutes: number, message?: string) {
+    async submitOffer(serviceId: string, price: number, etaMinutes?: number, message?: string) {
       const res = await fetch(`${API_BASE}/services/${serviceId}/offers`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getAuthHeader() },
-        body: JSON.stringify({ price, etaMinutes, message })
+        body: JSON.stringify({ price, etaMinutes, etaReported: etaMinutes !== undefined, message })
       });
       return handleResponse(res, "Error al enviar oferta");
     },

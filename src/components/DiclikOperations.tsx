@@ -1,4 +1,5 @@
-import { ServicePreview, requestPhotos, type ServiceArea } from "./ServicePreview";
+import { BadgeCheck, Check, ClipboardList, Phone, Star, Timer, UserRound } from "lucide-react";
+import { ServicePreview, ServiceRequester, requestPhotos, type ServiceArea } from "./ServicePreview";
 import type { WorkAlert } from "../services/publicationSound";
 import { FormEvent, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { RadarPoint } from "./RadarMap";
@@ -16,7 +17,7 @@ type RadarRequest = {
   id: string; title: string; status: string; category: string | null;
   approxLat: number; approxLng: number; min_budget: number; distanceKm: number; clientAvatar?: string | null; clientName?: string | null;
 };
-type Offer = { id: string; pro_name: string; professional_id: string; price: number; counter_price?: number; counter_proposed_by?: string; message: string; status: string };
+type Offer = { id: string; pro_name: string; pro_avatar?: string; pro_phone?: string; pro_trade?: string; pro_rating?: number; pro_reviews?: number; pro_verified?: boolean; eta_minutes?: number; eta_reported?: boolean; professional_id: string; price: number; counter_price?: number; counter_proposed_by?: string; message: string; status: string };
 type Contract = { completed_at?: string; pro_name?: string; agreed_price: number; commission_rate: number; platform_fee: number; professional_payout: number; id: string; request_title: string; status: string; address: string; otp_code?: string; professional_id: string; client_id: string };
 type Conversation = { id: string; client_id: string; request_title: string; client_name: string; pro_name: string };
 type Message = { id: string; sender_name: string; content: string };
@@ -43,17 +44,22 @@ function approximateCoordinate(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-function AmountForm({ label, onSubmit, disabled }: {
-  label: string; onSubmit: (amount: number) => void; disabled: boolean;
+function AmountForm({ label, onSubmit, disabled, amountRef, requestEta = false }: {
+  label: string; onSubmit: (amount: number, eta?: number) => void; requestEta?: boolean; disabled: boolean; amountRef?: { current: HTMLInputElement | null };
 }) {
   const [amount, setAmount] = useState("");
+  const [eta, setEta] = useState("");
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    onSubmit(Number(amount));
+    onSubmit(Number(amount), requestEta && eta ? Number(eta) : undefined);
   };
-  return <form className="flex gap-2" onSubmit={submit}>
-    <input className={input} aria-label={label + " en pesos"} type="number" min="1" step="0.01" required value={amount} onChange={e => setAmount(e.target.value)} />
-    <button className={button} disabled={disabled}>{label}</button>
+  return <form className={requestEta ? "grid gap-2" : "flex flex-wrap gap-2"} onSubmit={submit}>
+    <input ref={amountRef} className={input} aria-label={label + " en pesos"} type="number" min="1" step="0.01" required value={amount} onChange={e => setAmount(e.target.value)} />
+    {requestEta && <label className="space-y-1 text-sm text-slate-200">
+      <span>Llegada estimada en minutos (opcional)</span>
+      <input className={input} type="number" min="5" max="480" step="1" value={eta} onChange={event => setEta(event.target.value)} />
+    </label>}
+    <button className={requestEta ? "min-h-10 rounded-lg bg-indigo-600 px-4 py-2 font-bold text-white disabled:opacity-50" : button} disabled={disabled}>{label}</button>
   </form>;
 }
 
@@ -80,6 +86,10 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
   const [radarCenter, setRadarCenter] = useState<GPS | null>(null);
   const [radarSelected, setRadarSelected] = useState<string | null>(null);
   const [radarError, setRadarError] = useState(false);
+  const [offerSort, setOfferSort] = useState<RadarSort>("precio");
+  const [requestCategory, setRequestCategory] = useState("");
+  const quoteInput = useRef<HTMLInputElement>(null);
+  const [focusQuote, setFocusQuote] = useState("");
   const [radarSort, setRadarSort] = useState<RadarSort>("precio");
   const [geographicMap, setGeographicMap] = useState(false);
   const sortedSpecialists = useMemo(() => [...specialists].sort((a, b) => {
@@ -112,6 +122,13 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
   const [disputes, setDisputes] = useState<{ id: string; reason: string; status: string }[]>([]);
   const isAdmin = user?.role === "admin";
   const canQuote = !isClient && user?.role === role;
+  useEffect(() => {
+    if (selection && focusQuote === selection) {
+      quoteInput.current?.focus();
+      setFocusQuote("");
+    }
+  }, [focusQuote, selection]);
+
 
   useEffect(() => {
     if (view !== "requests" || isClient || !initialRequest || !requestsLoaded || selection !== initialRequest) return;
@@ -198,10 +215,30 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
     }
   }
 
-  const visibleRequests = offerPanel ? requests.filter(row => row.id === initialRequest) : requests;
+  const categories: string[] = [...new Set<string>(requests.map(row => row.category_name).filter(Boolean) as string[])];
+  const visibleRequests = offerPanel ? requests.filter(row => row.id === initialRequest)
+    : !isClient && requestCategory ? requests.filter(row => row.category_name === requestCategory) : requests;
+  const orderedOffers = [...offers].sort((first, second) => {
+    if (first.status === "accepted" || second.status === "accepted") return Number(second.status === "accepted") - Number(first.status === "accepted");
+    if (offerSort === "rapido") return (first.eta_reported ? first.eta_minutes ?? Infinity : Infinity) - (second.eta_reported ? second.eta_minutes ?? Infinity : Infinity);
+    if (offerSort === "rating") return (Number(second.pro_reviews) > 0 ? Number(second.pro_rating) : 0) -
+      (Number(first.pro_reviews) > 0 ? Number(first.pro_rating) : 0);
+    return Number(first.counter_price ?? first.price) - Number(second.counter_price ?? second.price);
+  });
   const list = view === "requests" && (
     <>
       <h2 className="font-bold text-amber-300">{isAdmin ? "Administración" : offerPanel ? "Ofertas de tu solicitud" : isClient ? "Mis solicitudes y ofertas" : "Solicitudes disponibles"}</h2>
+      {!isClient && categories.length > 0 && <div className="space-y-2">
+        <p className="flex justify-between gap-2 text-xs font-bold text-slate-300">
+          <span>Filtrar por especialidad</span><span className="text-amber-300">{visibleRequests.length} {visibleRequests.length === 1 ? "solicitud" : "solicitudes"}</span>
+        </p>
+        <div className="flex gap-2 overflow-x-auto pb-1" aria-label="Filtrar por especialidad">
+          {["", ...categories].map(category => <button key={category} type="button" aria-pressed={requestCategory === category}
+            onClick={() => setRequestCategory(category)} className="shrink-0 rounded-full border border-slate-600 bg-slate-800 px-3 py-1.5 text-xs font-bold aria-pressed:border-amber-400 aria-pressed:bg-amber-400 aria-pressed:text-slate-950">
+            {category || "Todas"}
+          </button>)}
+        </div>
+      </div>}
       {offerPanel && <button type="button" className={button} onClick={() => { setOfferPanel(false); setSelection(""); }}>Ver todas mis solicitudes</button>}
       {isAdmin ? <>
         <h3 className="font-bold">Usuarios</h3>
@@ -225,24 +262,50 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
             }, "Disputa resuelta.")}>{decision === "refund_client" ? "Reembolsar al cliente" : "Liberar al especialista"}</button>)}
           </div>}
         </div>)}
-      </> : visibleRequests.length ? visibleRequests.map(row => <article key={row.id} ref={row.id === selection ? detailRef : undefined} className={`${card} scroll-mt-3`}>
-        <h3 className="font-bold">{row.title}</h3>
-        <p>{row.description}</p>
-        <p className="text-slate-300">{statusLabel[row.status] || row.status}</p>
-        {!isClient && <ServicePreview area={row.approximate_area} avatar={row.client_avatar} clientName={user ? row.client_name : undefined} />}
-        {!offerPanel && <button className={button} onClick={() => {
-          setOfferResult(null);
-          setSelection(id => id === row.id ? "" : row.id);
-        }} aria-expanded={selection === row.id}>
-          {isClient ? (selection === row.id ? "Ocultar ofertas" : "Ver ofertas")
-            : (selection === row.id ? "Ocultar detalles" : "Ver detalles de la solicitud")}
-        </button>}
+      </> : visibleRequests.length ? visibleRequests.map(row => <article key={row.id} ref={row.id === selection ? detailRef : undefined}
+        className={`${card} scroll-mt-3 ${isClient ? "" : "border-emerald-500/45 bg-[#192639] p-3.5"}`}>
+        {isClient ? <>
+          <h3 className="font-bold">{row.title}</h3>
+          <p>{row.description}</p>
+          <p className="text-slate-300">{statusLabel[row.status] || row.status}</p>
+        </> : <>
+          <div className="flex items-center justify-between gap-2 rounded-xl bg-slate-950 px-3 py-2">
+            <p className="flex items-center gap-2 font-bold text-slate-100"><ClipboardList size={16} aria-hidden="true" className="shrink-0 text-amber-300" />{row.category_name || "Servicio"}</p>
+            <span className="rounded-md bg-emerald-950 px-2 py-1 text-xs font-semibold text-emerald-200">{statusLabel[row.status] || row.status}</span>
+          </div>
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-0.5 py-1">
+            <ServiceRequester avatar={row.client_avatar} clientName={user ? row.client_name : undefined} />
+            <div className="text-right text-xs text-slate-300">
+              {Number(row.min_budget) > 0 && <p>Presupuesto desde</p>}
+              <p className="font-bold text-emerald-300">{Number(row.min_budget) > 0 ? pesos.format(row.min_budget!) : "Cotización abierta"}</p>
+            </div>
+          </div>
+          <div className="space-y-2.5 rounded-xl bg-slate-950/75 p-3">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <h3 className="font-bold text-amber-300">{row.title}</h3>
+              {row.urgency && <span className={`rounded-md px-2 py-1 text-xs font-bold ${row.urgency === "urgente" ? "bg-rose-950 text-rose-200" : "bg-slate-800 text-slate-200"}`}>
+                {{ urgente: "Urgente", express: "Exprés", programado: "Programado" }[row.urgency] ?? row.urgency}
+              </span>}
+            </div>
+            <p className="whitespace-pre-line break-words text-slate-100">{row.description}</p>
+            <ServicePreview area={row.approximate_area} />
+          </div>
+        </>}
+        {!offerPanel && <div className="flex flex-wrap gap-2">
+          <button type="button" className={`${button} min-h-10`} onClick={() => {
+            setOfferResult(null);
+            setSelection(id => id === row.id ? "" : row.id);
+          }} aria-expanded={selection === row.id}>
+            {isClient ? (selection === row.id ? "Ocultar ofertas" : "Ver ofertas")
+              : (selection === row.id ? "Ocultar detalles" : "Ver detalles de la solicitud")}
+          </button>
+          {!isClient && selection !== row.id && canQuote && row.client_id !== user?.id && <button type="button"
+            className="min-h-10 rounded-lg bg-indigo-600 px-4 py-2 font-bold text-white"
+            onClick={() => { setOfferResult(null); setSelection(row.id); setFocusQuote(row.id); }}>Cotizar</button>}
+        </div>}
         {selection === row.id && <>
           {!isClient && <div className="space-y-1 rounded-lg border border-slate-600 bg-slate-950 p-3 text-sm">
             <h4 className="font-bold text-white">Detalles del servicio</h4>
-            {row.category_name && <p>Especialidad · {row.category_name}</p>}
-            {row.urgency && <p>Urgencia · {{ urgente: "Urgente", express: "Exprés", programado: "Programado" }[row.urgency] ?? row.urgency}</p>}
-            {Number(row.min_budget) > 0 && <p>Presupuesto desde {pesos.format(row.min_budget!)}</p>}
             {user && user.id === row.client_id && <p className="font-semibold text-amber-200">Tú publicaste esta solicitud. Solo otro especialista puede cotizarla.</p>}
             {user && !canQuote && user.id !== row.client_id && <p className="text-amber-200">Para cotizar, entra con una cuenta acreditada del rol que solicita el cliente.</p>}
           </div>}
@@ -254,26 +317,67 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
           {requestPhotos(row.photos).map((url, index) =>
             <img key={index} src={url} alt={`Foto de la solicitud ${index + 1}`} className="max-h-32 rounded-lg object-contain" />
           )}
-          {offers.filter(offer => (isClient && row.client_id === user?.id) || offer.professional_id === user?.id).map(offer => <div key={offer.id} className={card}>
-            <p>{offer.pro_name} · RD$ {offer.counter_price || offer.price} · {statusLabel[offer.status] || offer.status}</p>
-            <p>{offer.message}</p>
-            {isClient && offer.status === "accepted" && <button type="button" className={button} onClick={onContractAccepted}>Ver contrato</button>}
-            {["pending", "countered"].includes(offer.status) && <>
-              <AmountForm label="Contraofertar" disabled={busy} onSubmit={amount => run(async () => {
-                await api.services.counterOffer(offer.id, amount); await refresh();
-              }, "Contraoferta enviada. Si la otra parte acepta, se formalizará el contrato.")} />
-              {(isClient ? offer.counter_proposed_by !== user?.id : Boolean(offer.counter_proposed_by && offer.counter_proposed_by !== user?.id)) && <button className={button} disabled={busy} onClick={() => run(async () => {
-                await api.services.acceptOffer(offer.id);
-                onWorkAlert?.("hired", "Contratación confirmada.");
-                onContractAccepted();
-              }, "Contratación confirmada.")}>Contratar</button>}
-              <button className={button} disabled={busy} onClick={() => run(async () => {
-                await api.services.rejectOffer(offer.id); await refresh();
-              }, "Oferta rechazada.")}>Rechazar</button>
-            </>}
-          </div>)}
-          {canQuote && row.client_id !== user?.id && <AmountForm label="Enviar cotización" disabled={busy} onSubmit={amount => run(async () => {
-            await api.services.submitOffer(row.id, amount, 15); await refresh();
+          {isClient && offers.length > 1 && <div className="flex flex-wrap gap-2" aria-label="Ordenar propuestas">
+            {([["precio", "Precio"], ["rapido", "Llegada"], ["rating", "Valoración"]] as const).map(([sort, label]) =>
+              <button key={sort} type="button" aria-pressed={offerSort === sort} onClick={() => setOfferSort(sort)}
+                className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-xs font-bold aria-pressed:border-emerald-400 aria-pressed:bg-emerald-500 aria-pressed:text-slate-950">{label}</button>)}
+          </div>}
+          {orderedOffers.filter(offer => (isClient && row.client_id === user?.id) || offer.professional_id === user?.id).map((offer, index) => {
+            const amount = pesos.format(offer.counter_price ?? offer.price);
+            const avatar = requestPhotos([offer.pro_avatar])[0];
+            const phone = offer.pro_phone?.replace(/[^+0-9]/g, "");
+            const pending = ["pending", "countered"].includes(offer.status);
+            const canAccept = isClient ? offer.counter_proposed_by !== user?.id : Boolean(offer.counter_proposed_by && offer.counter_proposed_by !== user?.id);
+            return <section key={offer.id} aria-label={`Propuesta de ${offer.pro_name}`} className={`space-y-3 rounded-2xl border bg-[#192639] p-3.5 ${index === 0 ? "border-amber-400/70" : "border-slate-600"}`}>
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  {avatar ? <img src={avatar} alt="Foto de perfil del especialista" loading="lazy" referrerPolicy="no-referrer"
+                    className="size-12 shrink-0 rounded-2xl border-2 border-amber-400 object-cover" />
+                    : <span aria-hidden="true" className="grid size-12 shrink-0 place-items-center rounded-2xl bg-slate-950 text-amber-300"><UserRound size={20} /></span>}
+                  <div className="min-w-0">
+                    <h4 className="break-words font-bold text-white">{offer.pro_name}{offer.pro_verified && <BadgeCheck size={15} className="ml-1 inline text-amber-300" aria-label="Acreditado" />}</h4>
+                    {offer.pro_trade && <p className="break-words text-xs text-slate-300">{offer.pro_trade}</p>}
+                    <div className="mt-1 flex flex-wrap gap-2 text-xs font-semibold">
+                      {Number(offer.pro_reviews) > 0 && <span className="inline-flex items-center gap-1 text-amber-300"><Star size={12} aria-hidden="true" />{offer.pro_rating} · {offer.pro_reviews} reseñas</span>}
+                      {offer.eta_reported && Number(offer.eta_minutes) > 0 && <span className="inline-flex items-center gap-1 text-emerald-300"><Timer size={12} aria-hidden="true" />{offer.eta_minutes} min estimados</span>}
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-slate-300">{statusLabel[offer.status] || offer.status}</p>
+                  <p className="font-black text-emerald-300">{amount}</p>
+                </div>
+              </div>
+              {offer.message && <p className="whitespace-pre-line break-words rounded-xl bg-slate-950/70 p-2.5 text-sm text-slate-100">{offer.message}</p>}
+              <div className="flex flex-wrap gap-2">
+                {isClient && offer.status === "accepted" && <>
+                  {phone && <a href={`tel:${phone}`} className={`${button} inline-flex min-h-10 items-center gap-2`}><Phone size={15} aria-hidden="true" />Llamar</a>}
+                  <button type="button" className={`${button} min-h-10`} onClick={onContractAccepted}>Ver contrato</button>
+                </>}
+                {pending && <>
+                  <details className="min-w-32 flex-1 rounded-xl bg-slate-800">
+                    <summary className="min-h-10 cursor-pointer px-3 py-2 font-bold text-emerald-100">Negociar</summary>
+                    <div className="space-y-2 px-2 pb-2">
+                      <AmountForm label="Contraofertar" disabled={busy} onSubmit={value => run(async () => {
+                        await api.services.counterOffer(offer.id, value); await refresh();
+                      }, "Contraoferta enviada. Si la otra parte acepta, se formalizará el contrato.")} />
+                      <button type="button" className={button} disabled={busy} onClick={() => run(async () => {
+                        await api.services.rejectOffer(offer.id); await refresh();
+                      }, "Oferta rechazada.")}>Rechazar propuesta</button>
+                    </div>
+                  </details>
+                  {canAccept && <button type="button" className="inline-flex min-h-10 flex-1 items-center justify-center gap-1.5 self-start rounded-xl bg-amber-400 px-3 py-2 font-black text-slate-950 disabled:opacity-50"
+                    disabled={busy} onClick={() => run(async () => {
+                      await api.services.acceptOffer(offer.id);
+                      onWorkAlert?.("hired", "Contratación confirmada.");
+                      onContractAccepted();
+                    }, "Contratación confirmada.")}><Check size={16} aria-hidden="true" />{isClient ? `Elegir por ${amount}` : "Aceptar contrapropuesta"}</button>}
+                </>}
+              </div>
+            </section>;
+          })}
+          {canQuote && row.client_id !== user?.id && <AmountForm label="Enviar cotización" amountRef={quoteInput} requestEta disabled={busy} onSubmit={(amount, eta) => run(async () => {
+            await api.services.submitOffer(row.id, amount, eta); await refresh();
           }, "Cotización enviada.")} />}
           {isClient && user && row.client_id === user.id && ["open", "negotiating"].includes(row.status) && <button className={button} disabled={busy} onClick={() => run(async () => {
             await api.services.remove(row.id); await refresh();
@@ -340,7 +444,8 @@ export function DiclikOperations({ view, user, role, onSignIn, initialRequest, o
           <h4 className="font-bold text-white">{item.title}</h4>
           <p className="text-slate-300">{item.category || "Servicio"} · {statusLabel[item.status]} · {item.distanceKm} km aprox.</p>
           {Number(item.min_budget) > 0 && <p>Presupuesto desde {pesos.format(item.min_budget)}</p>}
-          <ServicePreview avatar={item.clientAvatar} clientName={item.clientName} area={{ lat: item.approxLat, lng: item.approxLng }} />
+          <ServiceRequester avatar={item.clientAvatar} clientName={item.clientName} />
+          <ServicePreview area={{ lat: item.approxLat, lng: item.approxLng }} />
           <button type="button" className={button} onClick={() => onOpenRadarRequest?.(item.id)}>Ver detalles de la solicitud</button>
         </article>)}
       </div>}

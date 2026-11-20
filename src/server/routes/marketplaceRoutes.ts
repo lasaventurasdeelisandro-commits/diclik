@@ -438,7 +438,7 @@ marketplaceRouter.post("/services/:id/offers", requireAuth, requireRole("tecnico
   try {
     const proUser = req.user!;
     const { id } = req.params;
-    const { price, etaMinutes, message } = req.body;
+    const { price, etaMinutes, etaReported, message } = req.body;
 
     const parsedPrice = Number(price);
     if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) {
@@ -480,20 +480,25 @@ marketplaceRouter.post("/services/:id/offers", requireAuth, requireRole("tecnico
       return;
     }
 
+    if (etaReported === true && (!Number.isInteger(etaMinutes) || etaMinutes < 5 || etaMinutes > 480)) {
+      res.status(400).json({ error: "Indica una llegada estimada de 5 a 480 minutos." });
+      return;
+    }
     const parsedEta = Math.max(5, Math.min(480, parseInt(String(etaMinutes || "15"), 10) || 15));
     const offerId = "off_" + crypto.randomUUID().slice(0, 12);
 
     await db.transaction(async (tx) => {
       await tx.query(
-        `INSERT INTO offers (id, request_id, professional_id, price, eta_minutes, message, status)
-         VALUES ($1, $2, $3, $4, $5, $6, 'pending');`,
+        `INSERT INTO offers (id, request_id, professional_id, price, eta_minutes, message, eta_reported, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending');`,
         [
           offerId,
           id,
           proUser.id,
           parsedPrice,
           parsedEta,
-          String(message || "Propuesta formal presentada a través de Diclik.com").trim().slice(0, 1000)
+          String(message || "Propuesta formal presentada a través de Diclik.com").trim().slice(0, 1000),
+          etaReported === true
         ]
       );
 
